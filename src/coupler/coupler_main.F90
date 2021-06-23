@@ -664,11 +664,6 @@ newClock14 = mpp_clock_id( 'final flux_check_stocks' )
            call mpp_clock_end(newClockh)
            if(do_chksum) call atmos_ice_land_chksum('update_atmos_up+', (nc-1)*num_atmos_calls+na)
 
-!#IFDEF COUP_OAS
-!        call oas_send_field(Ice) ! sandra
-!#ENDIF
-           !--------------
-
         enddo
         call mpp_clock_end(newClock7)
 
@@ -741,9 +736,6 @@ newClock14 = mpp_clock_id( 'final flux_check_stocks' )
         ! does not modify either Ocean or Ice_ocean_boundary
         call flux_ocean_from_ice_stocks(Ocean_state, Ocean, Ice_ocean_boundary)
 
-#IFDEF COUP_OAS
-        call oas_send_field(Ice,Time_start,Time_ocean) ! sandra
-#ENDIF
         Time_ocean = Time_ocean +  Time_step_cpld
 
         !-----------------------------------------------------------------------
