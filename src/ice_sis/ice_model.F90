@@ -812,11 +812,11 @@ contains
              flux_v_new(i,j,k)  = flux_v(i,j,k)
              flux_t_new(i,j,k)  = flux_t(i,j,k)
              flux_q_new(i,j,k)  = flux_q(i,j,k)
-!#IFDEF COUP_OAS !sandra
-!             flux_lh_new(i,j,k) = flux_lhc(i,j,k)
-!#ELSE
+#IFDEF COUP_OAS !sandra
+             flux_lh_new(i,j,k) = flux_lhc(i,j,k)
+#ELSE
              flux_lh_new(i,j,k) = hlv*flux_q(i,j,k)
-!#ENDIF
+#ENDIF
              flux_lw_new(i,j,k) = flux_lw(i,j,k)
              flux_sw_nir_dir_new(i,j,k) = flux_sw_nir_dir(i,j,k)
              flux_sw_nir_dif_new(i,j,k) = flux_sw_nir_dif(i,j,k)
