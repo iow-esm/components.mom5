@@ -6,7 +6,8 @@
         {
             "label": "build_MOM5_haumea",
             "type": "shell",
-            "command": "cd /media/d/hagen/iow/climate/coupled_model/IOW_ESM/components/MOM5; rsync -r -i -u src haumea1:/data/hr275/IOW_ESM/components/MOM5/.; ssh -t haumea1 'cd /data/hr275/IOW_ESM/components/MOM5/; srun -t 01:00:00 -p compute -N1 --tasks-per-node 1 --pty bash -c \"source ~/.bash_profile; source build_fast.sh\"'",
+            "command": "cd ${workspaceRoot}/../; ./build.sh haumea",
+            //"command": "cd /media/d/Sync/Projects/IOW_ESM/components/MOM5; rsync -r -i -u src haumea1:/data/sk1480/IOW_ESM/components/MOM5/.; ssh -t haumea1 'cd /data/sk1480/IOW_ESM/components/MOM5/; srun -t 01:00:00 -p compute -N1 --tasks-per-node 1 --pty bash -c \"source ~/.bash_profile; source build_fast.sh\"'",
             "group": {
                 "kind": "build",
                 "isDefault": true
@@ -22,7 +23,7 @@
                     "${workspaceRoot}"
                 ],
                 "pattern": {
-                    "regexp": "^/data/hr275/IOW_ESM/components/MOM5/src/(.*?)\\((.*?)\\): (warning|error) (.*)",
+                    "regexp": "^/data/sk1480/IOW_ESM/components/MOM5/src/(.*?)\\((.*?)\\): (warning|error) (.*)",
                     "file": 1,
                     "line": 2,
                     "severity": 3,
@@ -97,7 +98,7 @@
         {
             "label": "run_IOW_ESM_haumea",
             "type": "shell",
-            "command": "ssh -t haumea1 'cd /data/hr275/IOW_ESM/scripts/run; source ~/.bash_profile; sbatch jobscript'",
+            "command": "cd ${workspaceRoot}/../../../; ./run.sh haumea",
             "group": {
                 "kind": "test",
                 "isDefault": true
