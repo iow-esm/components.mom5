@@ -40,8 +40,8 @@ IMPLICIT NONE
   END TYPE CPL_FLD
 
 #IFDEF OASIS_IOW_ESM
-  INTEGER, PARAMETER :: nfld_snd_tot=12
-  INTEGER, PARAMETER :: nfld_rcv_tot=14
+  INTEGER, PARAMETER :: nfld_snd_tot=18
+  INTEGER, PARAMETER :: nfld_rcv_tot=44
 #ELSE
   INTEGER, PARAMETER :: nfld_snd_tot=2
   INTEGER, PARAMETER :: nfld_rcv_tot=14

@@ -53,19 +53,19 @@ REAL(kind=8)      :: &
 !-------------------------------------------------------------------------------
 
 
-
+#ifdef OASIS_IOW_ESM
+! Do not read here, use instead oas_exchange_fields module
+#else
   DO jn = 1, nfld_rcv_tot
-!    IF( srcv(jn)%laction ) THEN
-      CALL oas_recieve( jn, isec, ztmp1(:,:), nrcvinfo(jn) )
-      ! write(*,*) " nrcvinfo(jn) ", nrcvinfo(jn), jn, OASIS_Rcv, isec
-      IF( nrcvinfo(jn) == OASIS_Rcv ) frcv(:,:,jn)=ztmp1(:,:)
-!    ENDIF
-  ENDDO
-
+    !    IF( srcv(jn)%laction ) THEN
+          CALL oas_recieve( jn, isec, ztmp1(:,:), nrcvinfo(jn) )
+          ! write(*,*) " nrcvinfo(jn) ", nrcvinfo(jn), jn, OASIS_Rcv, isec
+          IF( nrcvinfo(jn) == OASIS_Rcv ) frcv(:,:,jn)=ztmp1(:,:)
+    !    ENDIF
+      ENDDO
 !write(*,*)" oasis receive laction: " , srcv(jn)%laction, isec
 
 !IF (ltime) CALL get_timings (i_cpl_get, ntstep, dt, izerror)
-
 
   istatus=nf90_open('masks.nc', NF90_NOWRITE, ncfileid)
   istatus=nf90_inq_varid(ncfileid, 'tmom.msk' , ncvarid)
@@ -86,8 +86,8 @@ REAL(kind=8)      :: &
   jn = jn + 1 
 !  IF( nrcvinfo(jn) == OASIS_Rcv  ) THEN                                                              ! evaporation 2)
      do k = 1, size(Ice_boundary%q_flux,3)
-      WHERE (maskt == 0) Ice_boundary%q_flux(isc:iec,jsc:jec,k) =  -frcv(isc:iec,jsc:jec,jn)
-    enddo
+        WHERE (maskt == 0) Ice_boundary%q_flux(isc:iec,jsc:jec,k) =  -frcv(isc:iec,jsc:jec,jn)
+     enddo
 !  ENDIF 
   jn = jn + 1
 !  IF( nrcvinfo(jn) == OASIS_Rcv  ) THEN                                                              ! snow 3)
@@ -157,7 +157,7 @@ REAL(kind=8)      :: &
          WHERE (maskt == 0) Ice_boundary%t_flux(isc:iec,jsc:jec,k) =  -frcv(isc:iec,jsc:jec,jn)
      enddo 
 !  ENDIF
-
+#endif
 
 END SUBROUTINE oas_receive_field
 #ENDIF

@@ -215,10 +215,63 @@ SUBROUTINE oas_define(local_comm)
   ssnd(10)%var_name = MOM5_instance_letter//'STSUR04'
   ssnd(11)%var_name = MOM5_instance_letter//'STSUR05'
   ssnd(12)%var_name = MOM5_instance_letter//'STSUR06'
+  ssnd(13)%var_name = MOM5_instance_letter//'SALBE01' ! shortwave albedo of this ice class (1=open sea, 2..6=ice)
+  ssnd(14)%var_name = MOM5_instance_letter//'SALBE02'
+  ssnd(15)%var_name = MOM5_instance_letter//'SALBE03'
+  ssnd(16)%var_name = MOM5_instance_letter//'SALBE04'
+  ssnd(17)%var_name = MOM5_instance_letter//'SALBE05'
+  ssnd(18)%var_name = MOM5_instance_letter//'SALBE06'
 #endif
 
   ! Store info which fields to receive
   ALLOCATE( srcv(nfld_rcv_tot), stat = ierror )
+#ifdef OASIS_IOW_ESM
+  srcv( 1)%var_name = 'MRMRAI01'      ! precipitation
+  srcv( 2)%var_name = 'MRMEVA01'      ! evaporation
+  srcv( 3)%var_name = 'MRMEVA02'      ! evaporation
+  srcv( 4)%var_name = 'MRMEVA03'      ! evaporation
+  srcv( 5)%var_name = 'MRMEVA04'      ! evaporation
+  srcv( 6)%var_name = 'MRMEVA05'      ! evaporation
+  srcv( 7)%var_name = 'MRMEVA06'      ! evaporation
+  srcv( 8)%var_name = 'MRMSNO01'      ! snow
+  srcv( 9)%var_name = 'MRPSUR01'      ! sea level pressure
+  srcv(10)%var_name = 'MRU10M01'      ! u velocity 10m
+  srcv(11)%var_name = 'MRV10M01'      ! v velocity 10m
+  srcv(12)%var_name = 'MRUMOM01'      ! u wind stress
+  srcv(13)%var_name = 'MRUMOM02'      ! u wind stress
+  srcv(14)%var_name = 'MRUMOM03'      ! u wind stress
+  srcv(15)%var_name = 'MRUMOM04'      ! u wind stress
+  srcv(16)%var_name = 'MRUMOM05'      ! u wind stress
+  srcv(17)%var_name = 'MRUMOM06'      ! u wind stress
+  srcv(18)%var_name = 'MRVMOM01'      ! v wind stress
+  srcv(19)%var_name = 'MRVMOM02'      ! v wind stress
+  srcv(20)%var_name = 'MRVMOM03'      ! v wind stress
+  srcv(21)%var_name = 'MRVMOM04'      ! v wind stress
+  srcv(22)%var_name = 'MRVMOM05'      ! v wind stress
+  srcv(23)%var_name = 'MRVMOM06'      ! v wind stress
+  srcv(24)%var_name = 'MRRBBR01'      ! longwave radiation upward
+  srcv(25)%var_name = 'MRRBBR02'      ! longwave radiation upward
+  srcv(26)%var_name = 'MRRBBR03'      ! longwave radiation upward
+  srcv(27)%var_name = 'MRRBBR04'      ! longwave radiation upward
+  srcv(28)%var_name = 'MRRBBR05'      ! longwave radiation upward
+  srcv(29)%var_name = 'MRRBBR06'      ! longwave radiation upward
+  srcv(30)%var_name = 'MRRLWD01'      ! longwave radiation downward
+  srcv(31)%var_name = 'MRRSDD01'      ! shortwave radiation downward direct
+  srcv(32)%var_name = 'MRRSIN01'      ! shortwave radiation downward diffusive
+  srcv(33)%var_name = 'MRHLAT01'      ! latent heat flux
+  srcv(34)%var_name = 'MRHLAT02'      ! latent heat flux
+  srcv(35)%var_name = 'MRHLAT03'      ! latent heat flux
+  srcv(36)%var_name = 'MRHLAT04'      ! latent heat flux
+  srcv(37)%var_name = 'MRHLAT05'      ! latent heat flux
+  srcv(38)%var_name = 'MRHLAT06'      ! latent heat flux
+  srcv(39)%var_name = 'MRHSEN01'      ! sensible heat flux
+  srcv(40)%var_name = 'MRHSEN02'      ! sensible heat flux
+  srcv(41)%var_name = 'MRHSEN03'      ! sensible heat flux
+  srcv(42)%var_name = 'MRHSEN04'      ! sensible heat flux
+  srcv(43)%var_name = 'MRHSEN05'      ! sensible heat flux
+  srcv(44)%var_name = 'MRHSEN06'      ! sensible heat flux
+
+#else
   srcv( 1)%var_name = 'OCEREPRE'      ! precipitation
   srcv( 2)%var_name = 'OCEREEVA'      ! evaporation
   srcv( 3)%var_name = 'OCERESNO'      ! snow
@@ -233,6 +286,7 @@ SUBROUTINE oas_define(local_comm)
   srcv(12)%var_name = 'OCERESWF'      ! shortwave radiation downward diffusive
   srcv(13)%var_name = 'OCERELHF'      ! latent heat flux
   srcv(14)%var_name = 'OCERESHF'      ! sensible heat flux
+#endif
 
   ! Allocate field for temporary storage of coupler data
   ALLOCATE( exfld1(isc:iec, jsc:jec), stat = ierror )
