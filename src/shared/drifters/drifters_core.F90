@@ -1,4 +1,7 @@
 ! $Id: drifters_core.F90,v 14.0 2007/03/15 22:38:50 fms Exp $
+! IOW version 2.0 from 2014/05/07
+!<CONTACT EMAIL="torsten.seifert@io-warnemuende.de"> Torsten Seifert 
+!</CONTACT>
 !
 ! nf95 -r8 -g -I ~/regression/ia64/23-Jun-2005/CM2.1U_Control-1990_E1.k32pe/include/ -D_TEST_DRIFTERS -D_F95 quicksort.F90 drifters_core.F90
 
@@ -27,6 +30,9 @@ module drifters_core_mod
      integer :: npdim  ! max number of particles (drifters)
      integer, _ALLOCATABLE :: ids(:)_NULL  ! particle id number
      real   , _ALLOCATABLE :: positions(:,:)   _NULL
+     logical :: debug          ! iow ! use debugging options
+     logical :: add_noise      ! iow ! add isotropic noise
+     real    :: anoise, vnoise ! iow ! scale factors for noise
   end type drifters_core_type
 
   interface assignment(=)
@@ -139,22 +145,22 @@ contains
   end subroutine drifters_core_resize
 
 !###############################################################################
-  subroutine drifters_core_set_positions(self, positions, ermesg)
-    type(drifters_core_type)        :: self
-    real, intent(in)           :: positions(:,:)
-    character(*), intent(out)  :: ermesg
-    integer ier !, iflag
-    ermesg = ''
-    ier = 0
-    self%np = min(self%npdim, size(positions, 2))
-    self%positions(:,1:self%np) = positions(:,1:self%np)
-    self%it                = self%it + 1
-    if(ier/=0) ermesg = 'drifters::ERROR in drifters_core_set_positions'
-  end subroutine drifters_core_set_positions
+   subroutine drifters_core_set_positions(self, positions, ermesg)
+     type(drifters_core_type)   :: self
+     real, intent(in)           :: positions(:,:)
+     character(*), intent(out)  :: ermesg
+     integer ier !, iflag
+     ermesg = ''
+     ier = 0
+     self%np = min(self%npdim, size(positions, 2))
+     self%positions(:,1:self%np) = positions(:,1:self%np)
+     self%it                = self%it + 1
+     if(ier/=0) ermesg = 'drifters::ERROR in drifters_core_set_positions'
+   end subroutine drifters_core_set_positions
 
 !###############################################################################
   subroutine drifters_core_set_ids(self, ids, ermesg)
-    type(drifters_core_type)        :: self
+    type(drifters_core_type)   :: self
     integer, intent(in)        :: ids(:)
     character(*), intent(out)  :: ermesg
     integer ier, np !, iflag
@@ -169,7 +175,7 @@ contains
 subroutine drifters_core_remove_and_add(self, indices_to_remove_in, &
      & ids_to_add, positions_to_add, &
      & ermesg)
-    type(drifters_core_type)        :: self
+    type(drifters_core_type)   :: self
     integer, intent(in   )     :: indices_to_remove_in(:)
     integer, intent(in   )     :: ids_to_add(:)
     real   , intent(in   )     :: positions_to_add(:,:)

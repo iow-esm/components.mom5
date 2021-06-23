@@ -1044,7 +1044,7 @@ do n = 1, gas_fluxes%num_bcs  !{
                  gas_fields_atm%bc(n)%field(ind_pCair)%values(i) *              &
                  gas_fields_atm%bc(n)%field(ind_psurf)%values(i) * gas_fluxes%bc(n)%param(2)
             gas_fluxes%bc(n)%field(ind_flux)%values(i) = gas_fluxes%bc(n)%field(ind_kw)%values(i) *                &
-                 sqrt(660 / (gas_fields_ice%bc(n)%field(ind_sc_no)%values(i) + epsln)) *                           &
+                 sqrt(660 / (max(0.0,gas_fields_ice%bc(n)%field(ind_sc_no)%values(i)) + epsln)) *                           &
                  (gas_fields_ice%bc(n)%field(ind_csurf)%values(i) - cair(i))
             gas_fluxes%bc(n)%field(ind_deltap)%values(i) = (gas_fields_ice%bc(n)%field(ind_csurf)%values(i) - cair(i)) / &
                  (gas_fields_ice%bc(n)%field(ind_alpha)%values(i) * permeg + epsln)
@@ -1193,7 +1193,7 @@ do n = 1, gas_fluxes%num_bcs  !{
             gas_fluxes%bc(n)%field(ind_flux)%values(i) = 0.0
           endif  !}
         enddo  !} i
-
+	
       else  !}{
 
         call mpp_error(FATAL, ' Unknown implementation (' // trim(gas_fluxes%bc(n)%implementation) //    &
@@ -1207,7 +1207,7 @@ do n = 1, gas_fluxes%num_bcs  !{
            ') for ' // trim(gas_fluxes%bc(n)%name))
 
     endif  !}
-      
+    
   endif  !}
 
 enddo  !} n

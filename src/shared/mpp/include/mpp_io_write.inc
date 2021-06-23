@@ -262,6 +262,7 @@
       integer :: istat      
       logical :: domain_exist
       type(domain2d), pointer :: io_domain => NULL()
+      integer :: time_axis_len
 
 !      call mpp_clock_begin(mpp_write_clock)
       !--- the shift and cartesian information is needed in mpp_write_meta_field from all the pe.
@@ -271,7 +272,7 @@
            
       domain_exist = .false.
 
-     if( PRESENT(domain) ) then
+     if( PRESENT(domain) .and. .not. mpp_file(unit)%use_parNetCDF) then
          domain_exist = .true.
          call mpp_get_global_domain( domain, isg, ieg )
          if(mpp_file(unit)%io_domain_exist) then
@@ -333,26 +334,45 @@
 !write axis def
 !space axes are always floats, time axis is always double
           if( ASSOCIATED(axis%data) )then !space axis
-              error = NF_DEF_DIM( mpp_file(unit)%ncid, axis%name, axis%len, axis%did )
+              error = NF90_DEF_DIM( mpp_file(unit)%ncid, axis%name, axis%len, axis%did )
               call netcdf_err( error, mpp_file(unit), axis )
               if(pack_size == 1) then
-                 error = NF_DEF_VAR( mpp_file(unit)%ncid, axis%name, NF_DOUBLE, 1, axis%did, axis%id )
+                 error = NF90_DEF_VAR( mpp_file(unit)%ncid, axis%name, NF_DOUBLE, axis%did, axis%id )
               else ! pack_size == 2
-                 error = NF_DEF_VAR( mpp_file(unit)%ncid, axis%name, NF_FLOAT, 1, axis%did, axis%id )
+                 error = NF90_DEF_VAR( mpp_file(unit)%ncid, axis%name, NF_FLOAT, axis%did, axis%id )
               endif
               call netcdf_err( error, mpp_file(unit), axis )
+
+              if(debug) write(stdlog(),*) 'NF90_DEF_DIM_1 ',trim(axis%name),' ',axis%len,axis%did,axis%id
+              if(mpp_file(unit)%use_parNetCDF) then
+                 error = NF90_VAR_PAR_ACCESS (mpp_file(unit)%ncid, axis%id,NF90_INDEPENDENT)
+              end if
           else                            !time axis
+!kk           In the current parallel NetCDF implementation, IO to files with limited time axis is
+!kk           much faster than unlimited time axis. The number of time steps as to be detemined for
+!kk           actual file setup of the current run
+
+              if(mpp_file(unit)%use_parNetCDF) then
+                 time_axis_len = NF_UNLIMITED
+!kk                 time_axis_len = 8                          !kk Only for Testing
+              else
+                 time_axis_len = NF_UNLIMITED
+              end if
               if( mpp_file(unit)%id.NE.-1 ) &
                    call mpp_error( FATAL, 'MPP_WRITE_META_AXIS: There is already a time axis for this file.' )
-              error = NF_DEF_DIM( mpp_file(unit)%ncid, axis%name, NF_UNLIMITED, axis%did )
+              error = NF90_DEF_DIM( mpp_file(unit)%ncid, axis%name, time_axis_len, axis%did )
               call netcdf_err( error, mpp_file(unit), axis )
               if(pack_size == 1) then
-                 error = NF_DEF_VAR( mpp_file(unit)%ncid, axis%name, NF_DOUBLE, 1, axis%did, axis%id )
+                 error = NF90_DEF_VAR( mpp_file(unit)%ncid, axis%name, NF_DOUBLE, axis%did, axis%id )
               else ! pack_size == 2
-                 error = NF_DEF_VAR( mpp_file(unit)%ncid, axis%name, NF_FLOAT, 1, axis%did, axis%id )
+                 error = NF90_DEF_VAR( mpp_file(unit)%ncid, axis%name, NF_FLOAT, axis%did, axis%id )
               endif
               call netcdf_err( error, mpp_file(unit), axis )
               mpp_file(unit)%id = axis%id !file ID is the same as time axis varID
+              if(debug) write(stdlog(),*) 'NF90_DEF_DIM_2 ',trim(axis%name),' NF_UNLIMITED ',axis%did,pack_size,axis%id
+              if(mpp_file(unit)%use_parNetCDF) then
+                 error = NF90_VAR_PAR_ACCESS (mpp_file(unit)%ncid, axis%id, NF90_COLLECTIVE)
+              end if
           end if
 #endif        
       else
@@ -432,6 +452,10 @@
       real :: a, b
       integer :: i, istat, ishift, jshift
       character(len=64) :: checksum_char
+      real(kind=4),parameter           :: floatFill=-1.e+20
+      integer(kind=4)                  :: intFill,i4base
+
+      intFill = transfer(floatFill,i4base)
 
 !      call mpp_clock_begin(mpp_write_clock)
 
@@ -524,29 +548,44 @@
 !write field def
           select case (field%pack)
               case(0)
-                  error = NF_DEF_VAR( mpp_file(unit)%ncid, field%name, NF_INT, size(field%axes(:)), axis_id, field%id )
+                  error = NF90_DEF_VAR( mpp_file(unit)%ncid, field%name, NF_INT, axis_id, field%id )
               case(1)
-                  error = NF_DEF_VAR( mpp_file(unit)%ncid, field%name, NF_DOUBLE, size(field%axes(:)), axis_id, field%id )
+                  error = NF90_DEF_VAR( mpp_file(unit)%ncid, field%name, NF_DOUBLE, axis_id, field%id )
               case(2)
-                  error = NF_DEF_VAR( mpp_file(unit)%ncid, field%name, NF_FLOAT,  size(field%axes(:)), axis_id, field%id )
+                  error = NF90_DEF_VAR( mpp_file(unit)%ncid, field%name, NF_FLOAT, axis_id, field%id )
+                  if(mpp_file(unit)%use_parNetCDF) then           !kk Only for parallel NNetCDF
+                  end if
               case(4)
                   if( .NOT.PRESENT(scale) .OR. .NOT.PRESENT(add) ) &
                        call mpp_error( FATAL, 'MPP_WRITE_META_FIELD: scale and add must be supplied when pack=4.' )
-                  error = NF_DEF_VAR( mpp_file(unit)%ncid, field%name, NF_SHORT,  size(field%axes(:)), axis_id, field%id )
+                  error = NF90_DEF_VAR( mpp_file(unit)%ncid, field%name, NF_SHORT, axis_id, field%id )
               case(8)  
                   if( .NOT.PRESENT(scale) .OR. .NOT.PRESENT(add) ) &
                        call mpp_error( FATAL, 'MPP_WRITE_META_FIELD: scale and add must be supplied when pack=8.' )
-                  error = NF_DEF_VAR( mpp_file(unit)%ncid, field%name, NF_BYTE,   size(field%axes(:)), axis_id, field%id )
+                  error = NF90_DEF_VAR( mpp_file(unit)%ncid, field%name, NF_BYTE, axis_id, field%id )
               case default
                   call mpp_error( FATAL, 'MPP_WRITE_META_FIELD: only legal packing values are 1,2,4,8.' )
           end select
           call netcdf_err( error, mpp_file(unit), field=field )
+          if(debug) write(stdlog(),*) 'NF90_DEF_VAR_1 ',field%pack,' ',trim(field%name),' ',size(field%axes(:)),field%id
 #ifndef use_netCDF3
           if(shuffle .NE. 0 .OR. deflate .NE. 0) then
-             error = NF_DEF_VAR_DEFLATE(mpp_file(unit)%ncid, field%id, shuffle, deflate, deflate_level)
+             error = NF90_DEF_VAR_DEFLATE(mpp_file(unit)%ncid, field%id, shuffle, deflate, deflate_level)
              call netcdf_err( error, mpp_file(unit), field=field )
           endif
+
 #endif
+          if(mpp_file(unit)%use_parNetCDF) then           !kk Only for parallel NNetCDF
+             if(size(field%axes(:)) >= 2 .or. field%time_axis_index /= -1)  then   !kk need better defination
+!kk             if(size(field%axes(:)) >= 2 .and. field%time_axis_index /= 2)  then   !kk for limited time axis and write time values only on PE3
+                write(stdlog(),*) 'Set variable collective ',trim(field%name)
+                error = NF90_VAR_PAR_ACCESS (mpp_file(unit)%ncid, field%id, NF90_COLLECTIVE)
+                error = NF90_DEF_VAR_FILL( mpp_file(unit)%ncid, field%id, 1, 0)     !kk disable prefilling
+             else
+                if(debug) write(stdlog(),*) 'Set variable indepent   ',trim(field%name)
+                error = NF90_VAR_PAR_ACCESS (mpp_file(unit)%ncid, field%id, NF90_INDEPENDENT)
+             end if
+          end if
 #endif    
       else
           varnum = varnum + 1
@@ -677,25 +716,30 @@
       character(len=*), intent(in), optional :: cval
       integer, intent(in), optional :: pack
       integer, allocatable :: rval_i(:)
+      real(kind=4),allocatable,dimension(:)         :: rv
+      real(kind=8),allocatable,dimension(:)         :: dv
+
 #ifdef use_netCDF
       if( PRESENT(rval) )then
 !pack is only meaningful for FP numbers
+          allocate(rv(size(rval)))
+          allocate(dv(size(rval)))
+
+          if( debug ) write(stdlog(),*) 'NF90_PUT_ATT_FLOAT ',trim(name),' ',rval,pack,KIND(rval)
+          dv = rval
+          rv = rval
           if( PRESENT(pack) )then
               if( pack.EQ.1 )then
                   if( KIND(rval).EQ.DOUBLE_KIND )then
-                      error = NF_PUT_ATT_DOUBLE( mpp_file(unit)%ncid, id, name, NF_DOUBLE, size(rval(:)), rval )
+                      error = NF90_PUT_ATT( mpp_file(unit)%ncid, id, name, dv )
                   else if( KIND(rval).EQ.FLOAT_KIND )then
                       call mpp_error( WARNING, &
                            'WRITE_ATTRIBUTE_NETCDF: attempting to write internal 32-bit real as external 64-bit.' )
-                      error = NF_PUT_ATT_REAL  ( mpp_file(unit)%ncid, id, name, NF_DOUBLE, size(rval(:)), rval )
-                  end if   
+                      error = NF90_PUT_ATT  ( mpp_file(unit)%ncid, id, name, dv )
+                  end if
                   call netcdf_err( error, mpp_file(unit), string=' Attribute='//name )
               else if( pack.EQ.2 )then
-                  if( KIND(rval).EQ.DOUBLE_KIND )then
-                      error = NF_PUT_ATT_DOUBLE( mpp_file(unit)%ncid, id, name, NF_FLOAT,  size(rval(:)), rval )
-                  else if( KIND(rval).EQ.FLOAT_KIND )then
-                      error = NF_PUT_ATT_REAL  ( mpp_file(unit)%ncid, id, name, NF_FLOAT,  size(rval(:)), rval )
-                  end if
+                  error = NF90_PUT_ATT  ( mpp_file(unit)%ncid, id, name, rv )
                   call netcdf_err( error, mpp_file(unit), string=' Attribute='//name )
               else if( pack.EQ.4 )then
                   allocate( rval_i(size(rval(:))) )
@@ -709,6 +753,7 @@
                   deallocate(rval_i)
               else if( pack.EQ.8 )then
                   allocate( rval_i(size(rval(:))) )
+!kk               has to changed to NF90_...
                   rval_i = rval
                   if( KIND(rval).EQ.DOUBLE_KIND )then
                       error = NF_PUT_ATT_DOUBLE( mpp_file(unit)%ncid, id, name, NF_BYTE,   size(rval_i(:)), rval )
@@ -720,24 +765,27 @@
               else
                   call mpp_error( FATAL, 'WRITE_ATTRIBUTE_NETCDF: only legal packing values are 1,2,4,8.' )
               end if
-          else    
-!default is to write FLOATs (32-bit)
-              if( KIND(rval).EQ.DOUBLE_KIND )then
-                  error = NF_PUT_ATT_DOUBLE( mpp_file(unit)%ncid, id, name, NF_FLOAT,  size(rval(:)), rval )
-              else if( KIND(rval).EQ.FLOAT_KIND )then
-                  error = NF_PUT_ATT_REAL  ( mpp_file(unit)%ncid, id, name, NF_FLOAT,  size(rval(:)), rval )
-              end if
+          else
+!             default is to write FLOATs (32-bit)
+              rv = rval
+              error = NF90_PUT_ATT  ( mpp_file(unit)%ncid, id, name, rv )
               call netcdf_err( error, mpp_file(unit), string=' Attribute='//name )
           end if
+          deallocate(rv,dv)
+
       else if( PRESENT(ival) )then
-          error = NF_PUT_ATT_INT ( mpp_file(unit)%ncid, id, name, NF_INT, size(ival(:)), ival )
+          if( debug ) write(stdlog(),*) 'NF90_PUT_ATT_INT ',trim(name),' ',ival
+          error = NF90_PUT_ATT  ( mpp_file(unit)%ncid, id, name, ival )
           call netcdf_err( error, mpp_file(unit), string=' Attribute='//name )
       else if( present(cval) )then
-          error = NF_PUT_ATT_TEXT( mpp_file(unit)%ncid, id, name, len_trim(cval), cval )
+          if( debug ) write(stdlog(),*) 'NF90_PUT_ATT_CHAR ',trim(name),' ',trim(cval)
+          error = NF90_PUT_ATT  ( mpp_file(unit)%ncid, id, name, trim(cval) )
           call netcdf_err( error, mpp_file(unit), string=' Attribute='//name )
       else
           call mpp_error( FATAL, 'WRITE_ATTRIBUTE_NETCDF: one of rval, ival, cval must be present.' )
       end if
+      call flush(stdlog())
+
 #endif /* use_netCDF */
       return
     end subroutine write_attribute_netcdf
@@ -902,6 +950,9 @@
 !   with a timestamp of NULLTIME. There is no check in the code to prevent
 !   the user from repeatedly writing a static field.
 
+      USE MPI
+
+
       integer,           intent(in)           :: unit, nwords
       type(fieldtype),   intent(in)           :: field
       real,              intent(in)           :: data(nwords)
@@ -909,18 +960,27 @@
       type(domain2D),    intent(in), optional :: domain
       integer,           intent(in), optional :: tile_count
       integer, dimension(size(field%axes(:))) :: start, axsiz
-      real(DOUBLE_KIND) :: time
+      real(DOUBLE_KIND), dimension(1) :: time
       integer :: time_level
       logical :: newtime
       integer :: subdomain(4)
       integer :: packed_data(nwords)
-      integer :: i, is, ie, js, je
+      integer :: i, is, ie, js, je, isc,  iec,  jsc,  jec, istat, ierr
+      integer,dimension(1)   :: start1,axsiz1
+      logical,save           :: first=.true.
 
       real(FLOAT_KIND) :: data_r4(nwords)
       pointer( ptr1, data_r4)
       pointer( ptr2, packed_data)
       
       if (mpp_io_stack_size < nwords) call mpp_io_set_stack_size(nwords)
+
+      if(present(domain) .and. first)   then
+#ifdef PAR_NETCDF
+         call write_big_tile_ini (domain)
+#endif
+         first = .false.
+      end if
 
       if( .NOT.module_is_initialized )call mpp_error( FATAL, 'MPP_WRITE: must first call mpp_io_init.' )
       if( .NOT.mpp_file(unit)%write_on_this_pe) return
@@ -932,12 +992,12 @@
           if( mpp_file(unit)%format.EQ.MPP_NETCDF )then
 #ifdef use_netCDF
 !NOFILL is probably required for parallel: any circumstances in which not advisable?
-              error = NF_SET_FILL( mpp_file(unit)%ncid, NF_NOFILL, i ); call netcdf_err( error, mpp_file(unit) )
+!kk              error = NF90_SET_FILL( mpp_file(unit)%ncid, NF_NOFILL, i ); call netcdf_err( error, mpp_file(unit) )
               if( mpp_file(unit)%action.EQ.MPP_WRONLY )then
-                 if(header_buffer_val>0) then
-                    error = NF__ENDDEF(mpp_file(unit)%ncid,header_buffer_val,4,0,4)
+                 if(header_buffer_val>0 .and. .not. mpp_file(unit)%use_parNetCDF) then
+                    error = NF90_ENDDEF(mpp_file(unit)%ncid,header_buffer_val,4,0,4)
                  else
-                    error = NF_ENDDEF(mpp_file(unit)%ncid)
+                    error = NF90_ENDDEF(mpp_file(unit)%ncid)
                  endif
               endif
               call netcdf_err( error, mpp_file(unit) )
@@ -950,14 +1010,14 @@
       end if
           
 !initialize time: by default assume NULLTIME
-      time = NULLTIME
+      time(1) = NULLTIME
       time_level = -1
       newtime = .FALSE.
-      if( PRESENT(time_in) )time = time_in
+      if( PRESENT(time_in) )time(1) = time_in
 !increment time level if new time
-      if( time.GT.mpp_file(unit)%time+EPSILON(time) )then !new time
+      if( time(1).GT.mpp_file(unit)%time+EPSILON(time) )then !new time
           mpp_file(unit)%time_level = mpp_file(unit)%time_level + 1
-          mpp_file(unit)%time = time
+          mpp_file(unit)%time = time(1)
           newtime = .TRUE.
       end if
       if( verbose )print '(a,2i3,2i5,es13.5)', 'MPP_WRITE: PE, unit, %id, %time_level, %time=',&
@@ -990,31 +1050,76 @@
           start = 1
           do i = 1,size(field%axes(:))
              axsiz(i) = field%size(i)
-             if( i.EQ.field%time_axis_index )start(i) = mpp_file(unit)%time_level
+             if( i.EQ.field%time_axis_index )  start(i) = mpp_file(unit)%time_level
              start(i) = max(start(i),1)
           end do
+          if( debug ) write(stdlog(),*) 'analyse dimensions ',size(field%axes(:)),field%time_axis_index,' ',trim(field%name)
+!kk       The decision, if variable is domain-dependent and/or collective can be done better
+          if(field%time_axis_index > 2 .or. field%time_axis_index == -1)  then
+             if(present(domain) .and. mpp_file(unit)%use_parNetCDF .and. size(field%axes(:)) >= 2) then
+                call mpp_get_compute_domain( domain, xbegin=isc,  xend=iec,  ybegin=jsc,  yend=jec)
+                if( debug ) write(stdlog(),'(a,6i6)') 'isc,  iec,  jsc,  jec  ',isc,  iec,  jsc,  jec, shape(data)
+                start(1) = isc
+                start(2) = jsc
+                axsiz(1) = iec-isc+1
+                axsiz(2) = jec-jsc+1
+             else
+!kk               write(stdlog(),*) 'No Domain ',present(domain),mpp_file(unit)%use_parNetCDF,size(field%axes(:))
+                if(mpp_file(unit)%use_parNetCDF .and. mpp_pe() /= 0) return
+             end if
+          else if(field%time_axis_index  >= 1)  then
+!kk             write(stdlog(),*) 'No Domain_X ',present(domain),mpp_file(unit)%use_parNetCDF,size(field%axes(:))
+          else
+!kk             write(stdlog(),*) 'Time axis value '
+             if(mpp_file(unit)%use_parNetCDF .and. mpp_pe() /= 0) return
+          end if
 
           if( debug )print '(a,2i6,12i6)', 'WRITE_RECORD: PE, unit, start, axsiz=', pe, unit, start, axsiz
 #ifdef use_netCDF
 !write time information if new time
           if( newtime )then
-              if( KIND(time).EQ.DOUBLE_KIND )then
-                  error = NF_PUT_VAR1_DOUBLE( mpp_file(unit)%ncid, mpp_file(unit)%id, mpp_file(unit)%time_level, time )
-              else if( KIND(time).EQ.FLOAT_KIND )then
-                  error = NF_PUT_VAR1_REAL  ( mpp_file(unit)%ncid, mpp_file(unit)%id, mpp_file(unit)%time_level, time )
-              end if
+!kk Normally, the time value should only be written on PE0. But with an unlimited time axis, the following
+!kk NF90_PUT_VAR hangs in NF90_CLOSE call (to be investigated)
+!kk            if(mpp_pe() == 0 .or. .not. mpp_file(unit)%use_parNetCDF) then
+              start1(1) = mpp_file(unit)%time_level
+              axsiz1(1) = 1
+!kk              write(stdlog(),*) 'mmp_write_1 ',start1,' axsiz1 ',axsiz1,' id ',mpp_file(unit)%id,mpp_file(unit)%use_parNetCDF
+              error = NF90_PUT_VAR  ( mpp_file(unit)%ncid, mpp_file(unit)%id, time(1:1), start=start1(1:1), count=axsiz1(1:1))
+!kk              write(stdlog(),*) 'After mmp_write_1 '
+!kk            end if
           end if  
           if( field%pack.LE.2 )then
-              if( KIND(data).EQ.DOUBLE_KIND )then
-                  error = NF_PUT_VARA_DOUBLE( mpp_file(unit)%ncid, field%id, start, axsiz, data )
-              else if( KIND(data).EQ.FLOAT_KIND )then
-                  error = NF_PUT_VARA_REAL  ( mpp_file(unit)%ncid, field%id, start, axsiz, data )
-              end if
+#ifdef PAR_NETCDF
+            if(mpp_file(unit)%use_parNetCDF) then
+               if(mpp_pe() == 0 .or. size(start) >= 2 .or. field%time_axis_index  >= 1 ) then       !FALSE -> No output on this PE
+                  if (((size(field%axes(:)) == 2 .and. field%time_axis_index  == -1) .or.        &  !tile or normal IO
+                     (size(field%axes(:)) >= 3 )))  then
+                     if( debug ) write(stdlog(),*) 'Before mmp_write_big ',start,' axsiz ',axsiz,' size ',size(axsiz),' ',  &
+                        trim(field%name),' ',field%fill, field%time_axis_index
+                     call write_big_tile (mpp_file(unit)%ncid, field%id, data, start, axsiz, field%fill, &
+                        field%time_axis_index, error)
+                     if( debug ) write(stdlog(),*) 'After mmp_write_big ',mpp_pe(),size(start)
+                  else
+                     if( debug ) write(stdlog(),*) 'Before mmp_write ',start,' axsiz ',axsiz,' size ',size(axsiz),' ',trim(field%name),' ',field%id
+                     error = NF90_PUT_VAR  ( mpp_file(unit)%ncid, field%id, data, start=start, count=axsiz)
+                     if( debug ) write(stdlog(),*) 'After mmp_write ',mpp_pe(),mpp_file(unit)%use_parNetCDF
+                  end if
+               endif
+            else                              !kk always write on all PE's in case of sequential NetCDF
+#endif
+              error = NF90_PUT_VAR  ( mpp_file(unit)%ncid, field%id, data, start=start, count=axsiz)
+#ifdef PAR_NETCDF
+            end if
+#endif
           else              !convert to integer using scale and add: no error check on packed data representation
               packed_data = nint((data-field%add)/field%scale)
               error = NF_PUT_VARA_INT   ( mpp_file(unit)%ncid, field%id, start, axsiz, packed_data )
           end if
           call netcdf_err( error, mpp_file(unit), field=field )
+          if(debug)  then
+            write(stdlog(),*) 'mmp_write_done ',trim(field%name)
+            call flush(stdlog())
+          end if
 #endif    
       else                      !non-netCDF
           ptr1 = LOC(mpp_io_stack(1))
@@ -1162,17 +1267,20 @@
                   call mpp_get_global_domain( axis%domain, isg, ieg )
                   ie  = ie + axis%shift
                   ieg = ieg + axis%shift
-                  error = NF_DEF_DIM( mpp_file(unit)%ncid, axis%name, ie-is+1, axis%did )
+              write(stdlog(),*) 'NF90_DEF_DIM_3 ',trim(axis%name),' ',is,ie,ie-is+1,axis%did
+                  error = NF90_DEF_DIM( mpp_file(unit)%ncid, axis%name, ie-is+1, axis%did )
               else
-                  error = NF_DEF_DIM( mpp_file(unit)%ncid, axis%name, size(axis%data(:)),          axis%did )
+              write(stdlog(),*) 'NF90_DEF_DIM_4 ',trim(axis%name),' ',axis%data,' size ',size(axis%data(:)),axis%did
+                  error = NF90_DEF_DIM( mpp_file(unit)%ncid, axis%name, size(axis%data(:)),          axis%did )
               end if
               call netcdf_err( error, mpp_file(unit), axis )
-              error = NF_DEF_VAR( mpp_file(unit)%ncid, axis%name, NF_FLOAT, 1, axis%did, axis%id )
+              error = NF90_DEF_VAR( mpp_file(unit)%ncid, axis%name, NF_FLOAT, axis%did, axis%id )
               call netcdf_err( error, mpp_file(unit), axis )
           else                            !time axis
-              error = NF_DEF_DIM( mpp_file(unit)%ncid, axis%name, NF_UNLIMITED, axis%did )
+              write(stdlog(),*) 'NF90_DEF_DIM_5 ',trim(axis%name),' NF_UNLIMITED ',axis%did
+              error = NF90_DEF_DIM( mpp_file(unit)%ncid, axis%name, NF_UNLIMITED, axis%did )
               call netcdf_err( error, mpp_file(unit), axis )
-              error = NF_DEF_VAR( mpp_file(unit)%ncid, axis%name, NF_DOUBLE, 1, axis%did, axis%id )
+              error = NF90_DEF_VAR( mpp_file(unit)%ncid, axis%name, NF_DOUBLE, axis%did, axis%id )
               call netcdf_err( error, mpp_file(unit), axis )
               mpp_file(unit)%id = axis%id !file ID is the same as time axis varID
               mpp_file(unit)%recdimid = axis%did ! record dimension id
@@ -1234,6 +1342,7 @@
       integer, allocatable :: axis_id(:)
       real :: a, b
       integer :: i, error
+      real(kind=4),parameter           :: floatFill=100.
       
 !      call mpp_clock_begin(mpp_write_clock)
       if( .NOT.module_is_initialized    )call mpp_error( FATAL, 'MPP_WRITE_META: must first call mpp_io_init.' )
@@ -1281,20 +1390,33 @@
 !write field def
           select case (field%pack)
               case(1)
-                  error = NF_DEF_VAR( mpp_file(unit)%ncid, field%name, NF_DOUBLE, size(field%axes(:)), axis_id, field%id )
+                  error = NF90_DEF_VAR( mpp_file(unit)%ncid, field%name, NF_DOUBLE, axis_id, field%id )
               case(2)
-                  error = NF_DEF_VAR( mpp_file(unit)%ncid, field%name, NF_FLOAT,  size(field%axes(:)), axis_id, field%id )
+                  error = NF90_DEF_VAR( mpp_file(unit)%ncid, field%name, NF_FLOAT, axis_id, field%id )
+                  error = NF90_DEF_VAR_FILL( mpp_file(unit)%ncid, field%id, 0, 0)
               case(4)
 !                 if( field%scale.EQ.default_field%scale .OR. field%add.EQ.default_field%add ) &
 !                      call mpp_error( FATAL, 'MPP_WRITE_META_FIELD: scale and add must be supplied when pack=4.' )
-                  error = NF_DEF_VAR( mpp_file(unit)%ncid, field%name, NF_SHORT,  size(field%axes(:)), axis_id, field%id )
+                  error = NF90_DEF_VAR( mpp_file(unit)%ncid, field%name, NF_SHORT, axis_id, field%id )
               case(8)  
 !                 if( field%scale.EQ.default_field%scale .OR. field%add.EQ.default_field%add ) &
 !                      call mpp_error( FATAL, 'MPP_WRITE_META_FIELD: scale and add must be supplied when pack=8.' )
-                  error = NF_DEF_VAR( mpp_file(unit)%ncid, field%name, NF_BYTE,   size(field%axes(:)), axis_id, field%id )
+                  error = NF90_DEF_VAR( mpp_file(unit)%ncid, field%name, NF_BYTE, axis_id, field%id )
               case default
                   call mpp_error( FATAL, 'MPP_WRITE_META_FIELD: only legal packing values are 1,2,4,8.' )
           end select
+          write(stdlog(),*) 'NF90_DEF_VAR_2 ',field%pack,' ',trim(field%name),' ',size(field%axes(:)),field%id
+          if(mpp_file(unit)%use_parNetCDF) then           !kk Only for parallel NNetCDF
+             if(size(field%axes(:)) >= 2 .or. field%time_axis_index /= -1)  then   !kk need better defination
+!kk             if(size(field%axes(:)) >= 2 .and. field%time_axis_index /= 2)  then   !kk need better defination
+                write(stdlog(),*) 'Set variable collective ',trim(field%name)
+                error = NF90_VAR_PAR_ACCESS (mpp_file(unit)%ncid, field%id, NF90_COLLECTIVE)
+                error = NF90_DEF_VAR_FILL( mpp_file(unit)%ncid, field%id, 1, 0)     !kk disable prefilling
+             else
+                write(stdlog(),*) 'Set variable indepent   ',trim(field%name)
+                error = NF90_VAR_PAR_ACCESS (mpp_file(unit)%ncid, field%id, NF90_INDEPENDENT)
+             end if
+          end if
 #endif            
       else
           varnum = varnum + 1

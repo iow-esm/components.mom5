@@ -301,10 +301,21 @@
             threading_flag = MPP_SINGLE
          endif
       else if( fileset_flag.EQ.MPP_MULTI ) then
-         if(mpp_npes() > 10000) then
-            write( text,'(a,i6.6)' )trim(text)//'.', pe
+#ifdef PAR_NETCDF
+!kk determine if parallel NetCDF
+         mpp_file(unit)%use_parNetCDF = (index(file,'_par_') /= 0)                    !kk
+#else
+         mpp_file(unit)%use_parNetCDF = .false.             !kk No parallel NetCDF when directive is not set
+#endif
+
+         if(.not. mpp_file(unit)%use_parNetCDF)   then      !kk No Pe Number extension to file name
+            if(mpp_npes() > 10000) then
+               write( text,'(a,i6.6)' )trim(text)//'.', pe
+            else
+               write( text,'(a,i4.4)' )trim(text)//'.', pe
+            end if
          else
-            write( text,'(a,i4.4)' )trim(text)//'.', pe
+            write(stdlog(),*) 'File ',trim(file),' will be opened for parallel NetCDF '
          endif
       endif
       mpp_file(unit)%name = text
@@ -476,16 +487,43 @@
 #ifdef use_netCDF
 #ifdef use_netCDF3
           if( action_flag.EQ.MPP_WRONLY )then
-              if(debug) write(*,*) 'Blocksize for create of ', trim(mpp_file(unit)%name),' is ', fsize
-              error = NF__CREATE( trim(mpp_file(unit)%name), NF_NOCLOBBER, inital, fsize, mpp_file(unit)%ncid )
-              call netcdf_err( error, mpp_file(unit) )
-              if( verbose )print '(a,i6,i16)', 'MPP_OPEN: new netCDF file: pe, ncid=', pe, mpp_file(unit)%ncid
-          else if( action_flag.EQ.MPP_OVERWR )then
-              if(debug) write(*,*) 'Blocksize for create of ', trim(mpp_file(unit)%name),' is ', fsize
-              error = NF__CREATE( trim(mpp_file(unit)%name),NF_CLOBBER, inital, fsize, mpp_file(unit)%ncid )
+            if(mpp_file(unit)%use_parNetCDF) then                              !kk
+#ifdef PAR_NETCDF
+              write(stdlog(),*) 'NF90_CREATE_par_1 ',trim(mpp_file(unit)%name),' PeNr ',mpp_pe()
+              error = NF90_CREATE( trim(mpp_file(unit)%name),                                       &
+                                   OR( NF90_NOCLOBBER,                                                &
+                                   OR( NF90_MPIIO, NF90_NETCDF4 ) ),                                &
+                                   mpp_file(unit)%ncid, COMM = mpp_comm_private, INFO = MPI_INFO_NULL )
               call netcdf_err( error, mpp_file(unit) )
               action_flag = MPP_WRONLY !after setting clobber, there is no further distinction btwn MPP_WRONLY and MPP_OVERWR
               if( verbose )print '(a,i6,i16)', 'MPP_OPEN: overwrite netCDF file: pe, ncid=', pe, mpp_file(unit)%ncid
+#endif
+            else
+              if(debug) write(*,*) 'Blocksize for create of ', trim(mpp_file(unit)%name),' is ', fsize
+!kk              error = NF__CREATE( trim(mpp_file(unit)%name), NF_NOCLOBBER, inital, fsize, mpp_file(unit)%ncid )
+              error = NF90_CREATE( trim(mpp_file(unit)%name),NF_NOCLOBBER, mpp_file(unit)%ncid )   !kk Use NetCDF Defaults
+              call netcdf_err( error, mpp_file(unit) )
+              if( verbose )print '(a,i6,i16)', 'MPP_OPEN: new netCDF file: pe, ncid=', pe, mpp_file(unit)%ncid
+            end if
+          else if( action_flag.EQ.MPP_OVERWR )then
+            if(mpp_file(unit)%use_parNetCDF) then                              !kk
+#ifdef PAR_NETCDF
+              write(stdlog(),*) 'NF90_CREATE_par_2 ',trim(mpp_file(unit)%name),' PeNr ',mpp_pe()
+              error = NF90_CREATE( trim(mpp_file(unit)%name),                                       &
+                                   OR( NF90_CLOBBER,                                                &
+                                   OR( NF90_MPIIO, NF90_NETCDF4 ) ),                                &
+                                   mpp_file(unit)%ncid, COMM = mpp_comm_private, INFO = MPI_INFO_NULL )
+              call netcdf_err( error, mpp_file(unit) )
+              action_flag = MPP_WRONLY !after setting clobber, there is no further distinction btwn MPP_WRONLY and MPP_OVERWR
+              if( verbose )print '(a,i6,i16)', 'MPP_OPEN: overwrite netCDF file: pe, ncid=', pe, mpp_file(unit)%ncid
+#endif
+            else
+              if(debug) write(*,*) 'Blocksize for create of ', trim(mpp_file(unit)%name),' is ', fsize
+              error = NF90_CREATE( trim(mpp_file(unit)%name),NF_CLOBBER, mpp_file(unit)%ncid )
+              call netcdf_err( error, mpp_file(unit) )
+              action_flag = MPP_WRONLY !after setting clobber, there is no further distinction btwn MPP_WRONLY and MPP_OVERWR
+              if( verbose )print '(a,i6,i16)', 'MPP_OPEN: overwrite netCDF file: pe, ncid=', pe, mpp_file(unit)%ncid
+            end if
           else if( action_flag.EQ.MPP_APPEND )then
               inquire(file=trim(mpp_file(unit)%name),EXIST=exists)
               if (.NOT.exists) call mpp_error(FATAL,'MPP_OPEN:'&

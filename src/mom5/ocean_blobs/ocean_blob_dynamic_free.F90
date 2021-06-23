@@ -2709,6 +2709,8 @@ subroutine increase_buffer(buffer, newnum)
   type(blob_buffer_type), pointer :: new_buffer
   integer :: newbuffsize, m
 
+  newbuffsize = 0                           !kk must be initialized
+ 
   allocate(new_buffer)
   m=1
   do while (newnum>newbuffsize)

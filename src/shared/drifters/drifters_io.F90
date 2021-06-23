@@ -1,8 +1,15 @@
 ! $Id: drifters_io.F90,v 14.0 2007/03/15 22:38:56 fms Exp $
+! IOW version 1.0 from 2013/06/10
+!<CONTACT EMAIL="torsten.seifert@io-warnemuende.de"> Torsten Seifert 
+!</CONTACT>
 
 !!#include <fms_platform.h>
 
 module drifters_io_mod
+
+  use mpp_mod,    only: mpp_pe    ! iow
+  use mpp_io_mod, only: mpp_flush ! iow
+
   implicit none  
   private
 
@@ -45,7 +52,13 @@ contains
     self%enddef = .FALSE.
 
     ier = nf_create(filename, NF_CLOBBER, self%ncid)
-    if(ier/=NF_NOERR) ermesg = 'drifters_io_new::nf_create ('//filename//') '//nf_strerror(ier)
+!!    if(ier/=NF_NOERR) ermesg = 'drifters_io_new::nf_create ('//filename//') '//nf_strerror(ier)
+! iow : abort if nf_create fails !
+    if(ier/=NF_NOERR) then
+      ermesg = 'drifters_io_new::nf_create ('//filename//') '//nf_strerror(ier)
+      write(*,*) ermesg
+      call abort()
+    endif
 
     ! global attributes
     ier = nf_put_att_text(self%ncid, NF_GLOBAL, 'version', len_trim(version), trim(version))
@@ -219,7 +232,7 @@ contains
   subroutine drifters_io_write(self, time, np, nd, nf, ids, positions, fields, ermesg)
     type(drifters_io_type)        :: self
     real, intent(in)              :: time
-    integer, intent(in)           :: np    ! number of dirfters
+    integer, intent(in)           :: np    ! number of drifters
     integer, intent(in)           :: nd    ! number of dimensions
     integer, intent(in)           :: nf    ! number of fields
     integer, intent(in)           :: ids(np)          ! of size np
@@ -284,6 +297,11 @@ contains
          & ermesg = 'drifters_io_write::failed to write fields: '//nf_strerror(ier)
 
     self%it_id = self%it_id + np
+
+! iow
+    ier = NF_SYNC(self%ncid)
+    if(ier/=NF_NOERR) &
+       & ermesg = 'drifters_io_write::failed to nf_sync: '//nf_strerror(ier)
     
   end subroutine drifters_io_write
 
@@ -311,7 +329,7 @@ program test
   nd = 3
   ! number of fields 
   nf = 2
-  ! max number of dirfters 
+  ! max number of drifters 
   npmax = 20
   ! number of time steps
   nt = 50

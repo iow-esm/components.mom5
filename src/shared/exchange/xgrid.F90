@@ -3132,7 +3132,7 @@ subroutine put_1_to_xgrid_order_1(d_addrs, x_addrs, xmap, isize, jsize, xsize, l
         x(l) =  recv_buffer(xmap%x1_put(l)%pos)
      end do
   else
-     start_pos = 0
+     start_pos = 0 ! iow ! not used
      do l = 1, lsize
         ptr_x = x_addrs(l)
         do p = 1, comm%nrecv
@@ -3459,6 +3459,7 @@ subroutine get_1_from_xgrid(d_addrs, x_addrs, xmap, isize, jsize, xsize, lsize)
      d = 0
   enddo
   !--- To bitwise reproduce old results, first copy the data onto its own pe.
+  pos = 0 ! iow !
 
   do p = 1, comm%nrecv
      recv => comm%recv(p)
@@ -3634,6 +3635,9 @@ integer, intent(in), optional :: remap_method
 
   grid1 => xmap%grids(1)
   conservation_check_side1 = 0.0
+if(xmap%size < 1)  then              !kk make sure, that x_over, x_back are not accessed with size = 0
+  write(stdout(),*) 'KK friendly warns xmap%size(conservation_check_side1) =',xmap%size,' on PE',mpp_pe()
+endif
   if(grid1%tile_me .NE. tile_nest) conservation_check_side1(1) = sum(grid1%area*d)
 !  if(grid1%tile_me .NE. tile_parent .OR. grid1%id .NE. "ATM") &
 !      conservation_check_side1(1) = sum(grid1%area*d) 
@@ -3688,6 +3692,9 @@ integer, intent(in), optional :: remap_method
 
   grid1 => xmap%grids(1)
   conservation_check_side2 = 0.0
+if(xmap%size < 1)  then              !kk make sure, that x_over, x_back are not accessed with size = 0
+  write(stdout(),*) 'KK friendly warns xmap%size(conservation_check_side2) =',xmap%size,' on PE',mpp_pe()
+end if
   do g = 2,size(xmap%grids(:))
     grid2 => xmap%grids(g)
     if (grid_id==grid2%id) then

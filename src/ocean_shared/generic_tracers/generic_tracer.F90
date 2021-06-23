@@ -395,10 +395,12 @@ ierr = check_nml_error(io_status,'generic_tracer_nml')
   !  </IN>
   ! </SUBROUTINE>
 
-  subroutine generic_tracer_source(Temp,Salt,rho_dzt,dzt,hblt_depth,ilb,jlb,tau,dtts,&
+  subroutine generic_tracer_source(Temp,Salt,rho_dzt,dzt,xt,yt,hblt_depth,ilb,jlb,tau,dtts,&
        grid_dat,model_time,nbands,max_wavelength_band,sw_pen_band,opacity_band,      &
-       grid_ht, current_wave_stress)
+       grid_ht, current_wave_stress,diff_cbt)
+!TN       grid_ht, current_wave_stress)
     real, dimension(ilb:,jlb:,:),   intent(in) :: Temp,Salt,rho_dzt,dzt
+    real, dimension(ilb:,jlb:),     intent(in) :: xt,yt
     real, dimension(ilb:,jlb:),     intent(in) :: hblt_depth
     integer,                        intent(in) :: ilb,jlb,tau
     real,                           intent(in) :: dtts
@@ -410,6 +412,7 @@ ierr = check_nml_error(io_status,'generic_tracer_nml')
     real, dimension(:,ilb:,jlb:,:), intent(in) :: opacity_band
     real, dimension(ilb:,jlb:),optional, intent(in) :: grid_ht
     real, dimension(ilb:,jlb:),optional ,    intent(in) :: current_wave_stress
+    real, dimension(ilb:,jlb:,:,:),optional ,intent(in) :: diff_cbt
 
 
     character(len=fm_string_len), parameter :: sub_name = 'generic_tracer_update_from_source'
@@ -421,8 +424,9 @@ ierr = check_nml_error(io_status,'generic_tracer_nml')
          nbands,max_wavelength_band,sw_pen_band,opacity_band)
 
     if(do_generic_ERGOM)  call generic_ERGOM_update_from_source(tracer_list,Temp,Salt,rho_dzt,dzt,&
-         hblt_depth,ilb,jlb,tau,dtts,grid_dat,model_time,&
-         nbands,max_wavelength_band,sw_pen_band,opacity_band,current_wave_stress)
+         xt,yt,hblt_depth,ilb,jlb,tau,dtts,grid_dat,model_time,&
+         nbands,max_wavelength_band,sw_pen_band,opacity_band,current_wave_stress,diff_cbt)
+!TN         nbands,max_wavelength_band,sw_pen_band,opacity_band,current_wave_stress)
 
     if(do_generic_BLING)  call generic_BLING_update_from_source(tracer_list,Temp,Salt,rho_dzt,dzt,&
          hblt_depth,ilb,jlb,tau,dtts,grid_dat,model_time,&

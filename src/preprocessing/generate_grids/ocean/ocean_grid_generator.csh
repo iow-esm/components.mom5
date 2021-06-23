@@ -19,24 +19,29 @@
 # Users need to modify the following variables according to their need. 
 # These particular values are here for testing purposes in GFDL only.  
 #######################################################################
+module load intel.composerxe/2011_sp1.10.319 
+module load intel.composerxe/intel.license
+module load openmpi/1.6-intel
 
   set echo
-  set platform     = "ncrc.intel"                                    # A unique identifier for your platform
+  set platform     = "ifc"                                    # A unique identifier for your platform
   set npes         = 1                                      # number of processors
 #
 # input data file and destination grid
 #
-  set type         = "tripolar"                             # type of grid "tripolar" or "simple"
+#  set type         = "tripolar"                             # type of grid "tripolar" or "simple"
+  set type         = "simple"                             # type of grid "tripolar" or "simple"
 #
   set root         = $cwd:h:h:h:h                       # The directory that contains src/ and bin/
 #
 # Users must ensure the following  files exist for their platform.
 #
-  source $root/bin/environs.$platform                   # environment variables and compiler options
+#  source $root/bin/environs.$platform                   # environment variables and compiler options
 
-  set mkmfTemplate = $root/bin/mkmf.template.$platform  # path to mkmf template 
+#  set mkmfTemplate = $root/bin/mkmf.template.$platform  # path to mkmf template 
+  set mkmfTemplate = $cwd/mkmf.template.$platform  # path to mkmf template 
 
-  set topog_file   = $FMS_ARCHIVE/mom4/input_data/OCCAM_p5degree.nc
+#  set topog_file   = $FMS_ARCHIVE/mom4/input_data/OCCAM_p5degree.nc
 
 #############################################################################
 # Users need not change anything below this line except the namelists values.
@@ -53,7 +58,7 @@
     set mkmfTemplate  = $root/bin/mkmf.debugtemplate.$platform         
   endif
   set mkmf         = $root/bin/mkmf                         # path to executable mkmf
-  set cppDefs      = ( "-Duse_netCDF -Duse_netCDF3 -Duse_libMPI" )        # list of cpp #defines to be passed to the source files
+  set cppDefs      = ( "-Duse_netCDF -Duse_netCDF4 -Duse_libMPI" )        # list of cpp #defines to be passed to the source files
 
 # list the source code
   
@@ -69,7 +74,7 @@
   $mkmf -t $mkmfTemplate -p $executable:t -c "$cppDefs" $srclist 
 
   make $executable:t
-
+exit
 #--------------------------------------------------------------------------------------------------------
 # setup directory structure
   if ( ! -d $workdir )         mkdir $workdir

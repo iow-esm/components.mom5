@@ -167,7 +167,7 @@ contains
                     + sea_lev(i,j+1)-sea_lev(i,j)))/dyv(i,j)
        enddo
     enddo
-
+    
     ! put ice/snow mass and concentration on v-grid
     call t_to_uv(ci*(hi*DI+hs*DS), miv)
     call t_to_uv(ci, civ)
@@ -185,7 +185,7 @@ contains
           endif
        enddo
     enddo
-
+    
     do j = jsc, jec
        do i = isc, iec
           if((wetv(i,j)>0.5) .and. miv(i,j) > MIV_MIN ) then ! values for velocity calculation (on v-grid)
@@ -196,7 +196,7 @@ contains
           endif
        enddo
     enddo
-
+    
     do l=1,evp_sub_steps
        !
        ! calculate strain tensor for viscosities and forcing elastic eqn.
@@ -302,6 +302,7 @@ contains
           enddo
        enddo
     enddo
+    
     !
     ! make averages
     !
@@ -314,7 +315,6 @@ contains
           endif
        enddo
     enddo
-
   end subroutine ice_dynamics
 
   !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~!

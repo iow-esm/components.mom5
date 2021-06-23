@@ -599,7 +599,7 @@ type(ocean_thickness_type),     intent(in)    :: Thickness
 type(ocean_density_type),       intent(in)    :: Dens 
 type(ocean_velocity_type),      intent(inout) :: Velocity
 type(ocean_prog_tracer_type),   intent(inout) :: T_prog(:)
-type(ocean_wave_type),          intent(inout) :: Waves
+type(ocean_wave_type),          intent(in)    :: Waves
 
 integer :: i, j, kbot, n
 integer :: taum1, tau, tstep
@@ -816,7 +816,7 @@ subroutine current_wave_drag_diag(Thickness, Velocity, drag_coeff, Waves, Time, 
 type(ocean_thickness_type),     intent(in)    :: Thickness
 type(ocean_velocity_type),      intent(inout) :: Velocity
 real,  dimension(isd:,jsd:),    intent(out)   :: drag_coeff    
-type(ocean_wave_type),          intent(inout) :: Waves
+type(ocean_wave_type),          intent(in)    :: Waves
 type(ocean_time_type),          intent(in)    :: Time
 integer,                        intent(in)    :: tstep
 
@@ -913,7 +913,7 @@ real,parameter:: twopi=2.*pi
 
 
             ! calculate shear stress acting on grains at sediment surface   
-            wrk1_2d(i,j) = (ustar2/ucomb)*0.3152
+            wrk1_2d(i,j) = (ustar2/(ucomb + epsln))*0.3152
 
             ! the wave induced friction velocity wave_s is derived applying Nielsen (1992) for grain roughness
             ! store the total wave-current bottom stress in skin friction layer for later use in sediment dynamics
@@ -964,7 +964,7 @@ end subroutine current_wave_drag_diag
 subroutine wave_u_diag(wave_u, wave_s, Waves)
   real, dimension(isd:,jsd:), intent(inout) :: wave_u
   real, dimension(isd:,jsd:), intent(inout) :: wave_s
-  type(ocean_wave_type),      intent(inout) :: Waves
+  type(ocean_wave_type),      intent(in)    :: Waves
 
   real    :: omega, U_m, ampli, f_w, wk_times_depth, ruff, grain
   integer :: i, j

@@ -4,6 +4,8 @@
                  designed to be used as a postprocessor for the parallel I/O
                  programming interface "mpp_io_mod"
 
+chunking defined as horizontal slices, see call of nc_def_var_chunking
+
   V2.2.5: Seth Underwood <Seth.Underwood>
           Fix for NetCDF files that do not have a time dimension.
   V2.2.4:  Tushar.Mohan
@@ -121,6 +123,10 @@
 #ifndef DEFAULT_BF     /* default blocking factor, if none set */
 #  define DEFAULT_BF 1
 #endif
+
+#define NEW_CACHE_SIZE 128000000
+#define NEW_CACHE_NELEMS 2
+#define NEW_CACHE_PREEMPTION .75
 
 /* Information structure for a file */
 struct fileinfo
@@ -350,7 +356,15 @@ int main(int argc, char *argv[])
 		 fprintf(stderr,"Error: output file seems to exist already!\n");
 		 free(ncoutfile); return(1);
 		}
-	      status = nc__create(outfilename, format, 0, &blksz, &ncoutfile->ncfid);
+// TN
+              if (nc_set_chunk_cache(NEW_CACHE_SIZE, NEW_CACHE_NELEMS,
+     			  NEW_CACHE_PREEMPTION))
+                {
+                  fprintf(stderr,"Warning: No new cache size possible!\n");
+                }
+              fprintf(stderr,"Cache: %d %d %f %d\n",NEW_CACHE_SIZE,NEW_CACHE_NELEMS,NEW_CACHE_PREEMPTION,NC_SIZEHINT_DEFAULT );
+// TN	      status = nc__create(outfilename, format, 0, &blksz, &ncoutfile->ncfid);
+              status = nc__create(outfilename, format, 0, NC_SIZEHINT_DEFAULT, &ncoutfile->ncfid);
 	      if (status==(-1))
 		{
 		 fprintf(stderr,"Error: cannot create the output netCDF file!\n");
@@ -705,7 +719,7 @@ int process_file(char *ncname, unsigned char appendnc,
   {
    struct fileinfo *ncinfile;  /* Information about an input netCDF file */
    int nfiles2;  /* Number of files in the decomposed domain */
-   int d, v, n;  /* Loop variables */
+   int d, v, n, dims;  /* Loop variables */
    int dimid;  /* ID of a dimension */
    int decomp[4];  /* "domain_decomposition = #0, #1, #2, #3" attribute */
                    /*  #0 starting position of original dimension   */
@@ -715,6 +729,7 @@ int process_file(char *ncname, unsigned char appendnc,
    char attname[MAX_NC_NAME];  /* Name of a global or variable attribute */
    unsigned char ncinfileerror=0;  /* Were there any file errors? */
    int varID,rc;      /*  Variable ID */
+   size_t chunksize[4]; /* chunksize of 4D variables */
 
    if (print_mem_usage) check_mem_usage();
 
@@ -862,6 +877,25 @@ int process_file(char *ncname, unsigned char appendnc,
          if (defl>0) {
            if (rc=nc_def_var_deflate(ncoutfile->ncfid,varID,0,1,defl) != NC_NOERR) {
               printf("deflation not possible %d %d\n",NC_NOERR, rc); exit(1);
+           }
+//           fprintf(stderr,"VARS: %s #dims %d\n",ncoutfile->varname[v],ncoutfile->varndims[v]);
+           if (ncoutfile->varndims[v]==4) {
+           for (dims=0; dims<ncoutfile->varndims[v]; dims++)
+             {
+//               fprintf(stderr,"DIMS: %d Name: %s Size: %d",ncoutfile->vardim[v][dims],ncinfile->dimname[ncoutfile->vardim[v][dims]],
+//                       ncoutfile->dimfullsize[ncoutfile->vardim[v][dims]]);
+               if (ncoutfile->vardim[v][dims]==ncoutfile->recdim) {
+//                  fprintf(stderr," RECDIM\n");
+                  chunksize[dims]=1;
+               } else {
+//                  fprintf(stderr," NO-RECDIM\n");
+                  chunksize[dims]=ncoutfile->dimfullsize[ncoutfile->vardim[v][dims]];
+               }
+             }
+// chunking z-axis, could be done more clever
+             chunksize[1]=10;
+             rc=nc_def_var_chunking(ncoutfile->ncfid,varID,NC_CHUNKED,chunksize);
+             fprintf(stderr,"RC: %d\n",rc);
            }
          }
          for (n=0; n < ncinfile->natts[v]; n++)
@@ -1141,6 +1175,7 @@ int process_vars(struct fileinfo *ncinfile, struct fileinfo *ncoutfile,
                        varbufsize,ncinfile->varname[v]); return(1);
               }
             mem_allocated += varbufsize;
+// printf("CCCCC %d %d %d\n",v,missing, ncoutfile->varmiss[v]);
             if (missing && ncoutfile->varmiss[v])
               switch (ncinfile->datatype[v])
                 {

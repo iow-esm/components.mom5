@@ -1372,6 +1372,8 @@ integer function def_var(ncid, var, ntype, idim)
   character(len=30) :: problem
   integer :: stderrunit 
 
+  problem = 'Error Text not set '                  !kk
+
   stderrunit = stderr()
   mret = nf_def_var(ncid, var, ntype, 1, idim, def_var)
 

@@ -4,14 +4,16 @@
 # Geophysical Fluid Dynamics Laboratory / NOAA
 # Princeton Forrestal Campus
 # Last updated: 05/15/08
+# modified for iow:phy-2 2017-02-03
 
-NETCDFPATH = /usr/local/netcdf-4.0.1
+NETCDFPATH = ${NETCDF}
 SOURCES = mppnccombine.c
 OBJECTS = mppnccombine.o
 CC = icc
-CFLAGS =
-LFLAGS = -L${NETCDFPATH}/lib/shared
-LIBS = -lnetcdf -lhdf5_hl -lhdf5 -lmpi -lz
+CFLAGS = -I${NETCDF}/include
+LFLAGS = -L${NETCDFPATH}/lib64/ -Wl,-rpath,${NETCDFPATH}/lib64/
+#LIBS = -lnetcdf -lhdf5_hl -lhdf5 -lmpi -lz
+LIBS = -lnetcdf
 
 mppnccombine: $(OBJECTS)
 	$(CC) $(CFLAGS) -o mppnccombine -s $(OBJECTS) $(LFLAGS) $(LIBS)

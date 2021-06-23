@@ -219,6 +219,9 @@ module g_tracer_utils
      ! An 3D field for implicit vertical diffusion
      real, _ALLOCATABLE, dimension(:,:,:)  :: vdiffuse_impl  _NULL
 
+     ! An 3D field for vertical diffusion fluxes
+     real, _ALLOCATABLE, dimension(:,:,:)  :: zflux_diff  _NULL
+
      ! An auxiliary 3D field for keeping model dependent change tendencies, ... 
      real, pointer, dimension(:,:,:)  :: tendency  => NULL()
 
@@ -227,6 +230,7 @@ module g_tracer_utils
      integer :: diag_id_alpha=-1, diag_id_csurf=-1, diag_id_sc_no=-1, diag_id_aux=-1
      integer :: diag_id_btf=-1,diag_id_btm=-1, diag_id_vmove=-1, diag_id_vdiff=-1
      integer :: diag_id_vdiffuse_impl = -1, diag_id_tendency = -1, diag_id_field_taup1 = -1
+     integer :: diag_id_zflux_diff = -1
 
      ! Tracer Initial concentration if constant everywhere
      real    :: const_init_value = 0.0
@@ -878,7 +882,9 @@ contains
     if(g_tracer%prog) then
        allocate(g_tracer%tendency(isd:ied,jsd:jed,nk)); g_tracer%tendency(:,:,:) = 0.0
        allocate(g_tracer%vdiffuse_impl(isd:ied,jsd:jed,nk))
+       allocate(g_tracer%zflux_diff(isd:ied,jsd:jed,nk))
        g_tracer%vdiffuse_impl(:,:,:) = 0.0
+       g_tracer%zflux_diff(:,:,:) = 0.0
     endif
 
     if(g_tracer%flux_gas) then
@@ -1043,6 +1049,15 @@ contains
          g_tracer_com%axes(1:3),       &
          g_tracer_com%init_time,       &
          'Implicit vertical diffusion of ' // trim(g_tracer%alias),      &
+         trim('mole/m^2/s'),                  &
+         missing_value = -1.0e+20)
+
+    string=trim(g_tracer%alias) // trim("_zflux_diff")
+    g_tracer%diag_id_zflux_diff = register_diag_field(g_tracer%package_name, &
+         trim(string),                 &
+         g_tracer_com%axes(1:3),       &
+         g_tracer_com%init_time,       &
+         'Vertical diffusive flux of ' // trim(g_tracer%alias),      &
          trim('mole/m^2/s'),                  &
          missing_value = -1.0e+20)
 
@@ -1609,6 +1624,8 @@ contains
        array_ptr => g_tracer%vdiff
     case ('vdiffuse_impl') 
        array_ptr => g_tracer%vdiffuse_impl
+    case ('zflux_diff') 
+       array_ptr => g_tracer%zflux_diff
     case default 
        call mpp_error(FATAL, trim(sub_name)//": Not a known member variable: "//trim(member))   
     end select
@@ -1744,6 +1761,8 @@ contains
        array(:,:,:) = g_tracer%vdiff(:,:,:)
     case ('vdiffuse_impl') 
        array(:,:,:) = g_tracer%vdiffuse_impl(:,:,:)
+    case ('zflux_diff') 
+       array(:,:,:) = g_tracer%zflux_diff(:,:,:)
     case default 
        call mpp_error(FATAL, trim(sub_name)//": Not a known member variable: "//trim(member))   
     end select
@@ -1972,6 +1991,8 @@ contains
        g_tracer%vdiff  = array 
     case ('vdiffuse_impl') 
        g_tracer%vdiffuse_impl  = array 
+    case ('zflux_diff') 
+       g_tracer%zflux_diff  = array 
     case default 
        call mpp_error(FATAL, trim(sub_name)//": Not a known member variable: "//trim(member))   
     end select
@@ -2752,6 +2773,13 @@ contains
                ie_in=g_tracer_com%iec, je_in=g_tracer_com%jec, ke_in=g_tracer_com%nk)
        endif
 
+       if (g_tracer%diag_id_zflux_diff .gt. 0 .and. _ALLOCATED(g_tracer%zflux_diff)) then
+          used = send_data(g_tracer%diag_id_zflux_diff, g_tracer%zflux_diff(:,:,:), model_time,&
+               rmask = g_tracer_com%grid_tmask(:,:,:),& 
+               is_in=g_tracer_com%isc, js_in=g_tracer_com%jsc, ks_in=1,&
+               ie_in=g_tracer_com%iec, je_in=g_tracer_com%jec, ke_in=g_tracer_com%nk)
+       endif
+
        !traverse the linked list till hit NULL
        if(.NOT. associated(g_tracer%next)) exit
        g_tracer => g_tracer%next
@@ -3337,11 +3365,25 @@ contains
     !
 
     if (g_tracer%diag_id_vdiffuse_impl .gt. 0) then
-      do j = g_tracer_com%jsc, g_tracer_com%jec
-         do i = g_tracer_com%isc, g_tracer_com%iec
-            do k = 1, g_tracer_com%nk
+      do k = 1, g_tracer_com%nk
+         do j = g_tracer_com%jsc, g_tracer_com%jec
+            do i = g_tracer_com%isc, g_tracer_com%iec
                g_tracer%vdiffuse_impl(i,j,k) = dh(i,j,k) * g_tracer_com%grid_tmask(i,j,k) *   &
                     (g_tracer%field(i,j,k,tau) - g_tracer%vdiffuse_impl(i,j,k)) / dt
+            enddo
+         enddo
+      enddo
+    endif
+
+    if (g_tracer%diag_id_zflux_diff .gt. 0) then
+      g_tracer%zflux_diff = 0.0
+      do k = 1, g_tracer_com%nk-1
+         kp1 = k+1
+         do j = g_tracer_com%jsc, g_tracer_com%jec
+            do i = g_tracer_com%isc, g_tracer_com%iec
+               g_tracer%zflux_diff(i,j,k) = dcb(i,j,k) * g_tracer_com%grid_tmask(i,j,kp1)   &
+                              *(g_tracer%field(i,j,k,tau)-g_tracer%field(i,j,kp1,tau)) &
+			      /dhw(i,j,k)
             enddo
          enddo
       enddo

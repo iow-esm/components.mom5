@@ -2694,12 +2694,13 @@ subroutine entrainment_checksum(Time, hfree, hbott, f2b, b2f)
              'convergence','divergence'
         if (associated(this)) then
            blobcycle0: do
-              i=this%di(s)
-              j=this%dj(s)
-              k=this%dk(s)
-              print ('(2(i10,x),3(a1,i3),a1,x,4x,x,4(x,21x),(x,es21.14))'), this%hash, this%number, &
-                   '(',i,',',j,',',k,')', 0, &
-                   this%mass_out(s)
+!kk Next lines are commented out because s is not defined
+!              i=this%di(s)
+!              j=this%dj(s)
+!              k=this%dk(s)
+!              print ('(2(i10,x),3(a1,i3),a1,x,4x,x,4(x,21x),(x,es21.14))'), this%hash, this%number, &
+!                   '(',i,',',j,',',k,')', 0, &
+!                   this%mass_out(s)
               if (this%nfrac_steps>0) then
                  do s=1,this%nfrac_steps
                     i=this%di(s)

@@ -1,3 +1,195 @@
+#ifdef PAR_NETCDF
+!kk has to be moved into seperate File
+
+!kk This module add the area of inactive land PEs to neighboring active PEs
+!kk This algorithm ensures, that a complete 2d or 3D record will be written with one parallel NF90_PUT_VAR call
+
+module write_big_tile_mod
+   use mpi
+   use netcdf
+
+   use mpp_mod,            only : mpp_pe, mpp_npes, mpp_comm_private, stdlog
+   use mpp_domains_mod,    only : domain2d, mpp_get_global_domain, mpp_get_compute_domain
+
+   implicit none
+   private
+
+   integer,save             :: is_big, ie_big, js_big, je_big
+
+   interface write_big_tile_ini
+     module procedure write_big_tile_ini
+   end interface write_big_tile_ini
+
+   interface write_big_tile
+     module procedure write_big_tile
+   end interface write_big_tile
+
+   public write_big_tile_ini, write_big_tile
+
+
+ contains
+   subroutine write_big_tile_ini (domain)
+      implicit none
+
+      type(domain2D), intent(in)        :: domain
+
+      integer                           :: isc, iec, jsc, jec, ierr
+      integer                           :: isg, ieg, jsg, jeg, req_count
+      integer,dimension(2)              :: req
+      integer,dimension(4)              :: lim_local, lim_remote
+
+      call mpp_get_global_domain ( domain, xbegin=isg,  xend=ieg,  ybegin=jsg,  yend=jeg )
+      call mpp_get_compute_domain( domain, xbegin=isc,  xend=iec,  ybegin=jsc,  yend=jec )
+
+      lim_local(1) = isc
+      lim_local(2) = iec
+      lim_local(3) = jsc
+      lim_local(4) = jec
+
+!     Get compute domain from previous PE
+
+      req_count = 0
+      if(mpp_pe() <= mpp_npes()-2)   then
+         req_count = req_count+1
+         call MPI_Isend (lim_local,  4, MPI_Integer, mpp_pe()+1, 123, mpp_comm_private, req(req_count), ierr)
+      end if
+      if(mpp_pe() >= 1)   then
+         req_count = req_count+1
+         call MPI_Irecv (lim_remote, 4, MPI_Integer, mpp_pe()-1, 123, mpp_comm_private, req(req_count), ierr)
+      end if
+
+      call MPI_Waitall (req_count, req, MPI_STATUSES_IGNORE, ierr)
+
+      if(mpp_pe() == 0) then
+        is_big = 1
+      else if (jsc /= lim_remote(3))  then                 !kk if jsc changes, start new processor row
+        is_big = 1
+      else
+        is_big = lim_remote(2)+1
+      end if
+
+      req_count = 0
+      if(mpp_pe() >= 1)   then
+         req_count = req_count+1
+         call MPI_Isend (lim_local,  4, MPI_Integer, mpp_pe()-1, 456, mpp_comm_private, req(req_count), ierr)
+      end if
+      if(mpp_pe() <= mpp_npes()-2)   then
+         req_count = req_count+1
+         call MPI_Irecv (lim_remote, 4, MPI_Integer, mpp_pe()+1, 456, mpp_comm_private, req(req_count), ierr)
+      end if
+
+      call MPI_Waitall (req_count, req, MPI_STATUSES_IGNORE, ierr)
+
+      if(mpp_pe() == mpp_npes()-1) then
+        ie_big = ieg
+      else if (jsc /= lim_remote(3))  then
+        ie_big = ieg
+      else
+        ie_big = lim_remote(1)-1
+      end if
+
+      js_big = jsc
+      je_big = jec
+
+!kk      write(stdlog(),*) 'mmp_Big_Domain ', is_big, ie_big, js_big, je_big
+
+      return
+   end subroutine write_big_tile_ini
+
+   subroutine write_big_tile (ncid, varid, data, start, axsiz, fill_value, time_axis_index, error)
+      implicit none
+
+      integer, intent(IN)                     :: ncid, varid, time_axis_index
+      real, dimension(:),intent(IN)           :: data
+      integer, dimension(:),intent(IN)        :: start, axsiz
+      real, intent(IN)                        :: fill_value
+      integer, intent(OUT)                    :: error
+
+      integer                                 :: i, j, k, ks, ke, ind
+      real, allocatable, dimension(:,:,:)     :: big_data
+      integer,dimension(size(start))          :: big_start,big_axsiz
+      logical                                 :: is_3d
+      integer(kind=8)                         :: axis_product = 0
+      logical,parameter                       :: write_K_level_in_oneBlock = .false.
+
+      big_start    = start
+      big_axsiz    = axsiz
+      big_start(1) = is_big
+      big_start(2) = js_big
+      big_axsiz(1) = ie_big-is_big+1
+      big_axsiz(2) = je_big-js_big+1
+      axis_product = big_axsiz(1)*big_axsiz(2)
+
+      if((size(start) == 2 .and. time_axis_index == -1) .or.                            &
+         (size(start) == 3 .and. time_axis_index /= -1))  then          !2D array
+         ks = 1
+         ke = 1
+         is_3d = .false.
+      else                                                              !3D array
+         ks = start(3)
+         ke = start(3)+axsiz(3)-1
+         is_3d = .true.
+         axis_product = axis_product*axsiz(3)
+      end if
+
+      if(write_K_level_in_oneBlock)  then                               !If enough Memory, write whole 3D array
+         allocate (big_data(is_big:ie_big, js_big:je_big,ks:ke))
+
+         big_data = fill_value
+         ind = 0
+
+!kk         write(stdlog(),'(a,7i7)') 'in write_big_tile_S ',size(data),size(big_data),axis_product,shape(big_data)
+         do k=ks,ke
+            do j= js_big, je_big
+               do i=0,axsiz(1)-1
+                  ind = ind+1
+                  big_data(start(1)+i,j,k) = data(ind)
+               end do
+            end do
+         end do
+         if(ind /= size(data))  then
+           write(stdlog(),*) 'error in write_big_tile ',ind,size(data)
+           call MPI_abort(MPI_COMM_WORLD, i, error)
+         end if
+!kk         write(stdlog(),'(a,7i7)') 'in write_big_tile_B ',k,ind,ks,ke,big_axsiz
+
+         error = NF90_PUT_VAR  ( ncid, varid, big_data, start=big_start, count=big_axsiz)
+
+      else
+         allocate (big_data(is_big:ie_big, js_big:je_big,1))
+
+         ind = 0
+
+!kk         write(stdlog(),'(a,7i7)') 'in write_big_tile_M ',size(data),size(big_data),axis_product,shape(big_data)
+         do k=ks,ke
+            big_data = fill_value
+            do j= js_big, je_big
+               do i=0,axsiz(1)-1
+                  ind = ind+1
+                  big_data(start(1)+i,j,1) = data(ind)
+               end do
+            end do
+!kk            write(stdlog(),'(a,7i7)') 'in write_big_tile_B ',k,ind,ks,ke
+
+            if(is_3d) then
+               big_start(3) = k
+               big_axsiz(3) = 1
+            end if
+
+            error = NF90_PUT_VAR  ( ncid, varid, big_data, start=big_start, count=big_axsiz)
+         end do
+      end if
+
+!kk      write(stdlog(),'(a,10i7)') 'in write_big_tile_C ',varid,big_start,big_axsiz
+
+      deallocate (big_data)
+
+      return
+   end subroutine write_big_tile
+
+end module write_big_tile_mod
+
+#endif
 !-----------------------------------------------------------------------
 !                 Parallel I/O for message-passing codes
 !
@@ -317,7 +509,7 @@ use mpp_mod,            only : mpp_error, FATAL, WARNING, NOTE, stdin, stdout, s
 use mpp_mod,            only : mpp_pe, mpp_root_pe, mpp_npes, lowercase, mpp_transmit, mpp_sync_self
 use mpp_mod,            only : mpp_init, mpp_sync, mpp_clock_id, mpp_clock_begin, mpp_clock_end
 use mpp_mod,            only : MPP_CLOCK_SYNC, MPP_CLOCK_DETAILED, CLOCK_ROUTINE
-use mpp_mod,            only : input_nml_file
+use mpp_mod,            only : input_nml_file, mpp_comm_private                                   !kk
 use mpp_domains_mod,    only : domain1d, domain2d, NULL_DOMAIN1D, mpp_domains_init
 use mpp_domains_mod,    only : mpp_get_global_domain, mpp_get_compute_domain
 use mpp_domains_mod,    only :  mpp_get_data_domain, mpp_get_memory_domain
@@ -326,6 +518,13 @@ use mpp_domains_mod,    only : operator( .NE. ), mpp_get_domain_shift
 use mpp_domains_mod,    only : mpp_get_io_domain, mpp_domain_is_tile_root_pe, mpp_get_domain_tile_root_pe
 use mpp_domains_mod,    only : mpp_get_tile_id, mpp_get_tile_npes, mpp_get_io_domain_layout
 use mpp_domains_mod,    only : mpp_get_domain_name, mpp_get_domain_npes
+#ifdef PAR_NETCDF
+use write_big_tile_mod, only : write_big_tile_ini, write_big_tile
+#endif
+
+!kk
+USE netcdf
+USE MPI
 
 implicit none
 private
@@ -433,6 +632,7 @@ type :: atttype
      logical            :: valid
      logical            :: write_on_this_pe   ! indicate if will write out from this pe
      logical            :: io_domain_exist    ! indicate if io_domain exist or not.
+     logical            :: use_parNetCDF      ! indicate if parallel NetCDF is used for file-IO   !kk
      integer            :: id       !variable ID of time axis associated with file (only one time axis per file)
      integer            :: recdimid !dim ID of time axis associated with file (only one time axis per file)
      real(DOUBLE_KIND), pointer :: time_values(:) =>NULL() ! time axis values are stored here instead of axis%data 

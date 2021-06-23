@@ -1,12 +1,22 @@
 ! -*-f90-*-
 ! $Id: drifters_push.h,v 13.0 2006/03/28 21:38:35 fms Exp $
-!============================================================================
+
+!<CONTACT EMAIL="torsten.seifert@io-warnemuende.de"> Torsten Seifert 
+!</CONTACT>
+!<DESCRIPTION>
+!  IOW version 3.0 from 2014/11/28
+!  code changes: _DEBUG option
+!  initial buffer size max_add_remove=1000 (will be increased if necessary)
+!  reset Runge-Kutta contributions to zero
+!  clip depth range to z >=0 for 3D (experimental)
+!</DESCRIPTION>
+! iow ! #define _DEBUG
 subroutine drifters_push_XXX(self, u, v, &
 #if _DIMS >= 3
   & w, &
 #endif
   & ermesg)
-
+  use mpp_mod,only: stdlog !iow!
   type(drifters_type) :: self
 #if _DIMS == 2
   real, intent(in)    :: u(:,:)
@@ -20,7 +30,7 @@ subroutine drifters_push_XXX(self, u, v, &
   character(len=*), intent(out) :: ermesg
 
   integer i, np, nf, max_add_remove
-
+  
   ermesg = ''
   np = self%core%np
   nf = size(self%input%field_names)
@@ -37,7 +47,6 @@ subroutine drifters_push_XXX(self, u, v, &
      ! only invoked at the first step
 
      call drifters_reset_rk4(self, ermesg=ermesg)
-
 
      call drifters_compute_k(self, self%core%positions, &
           & u=u, v=v, &
@@ -87,6 +96,13 @@ subroutine drifters_push_XXX(self, u, v, &
      do i = 1, np
         self%temp_pos(:,i) = self%core%positions(:,i) + &
              & (self%rk4_k1(:,i) + 2*self%rk4_k2(:,i) + 2*self%rk4_k3(:,i) + self%rk4_k4(:,i))/6.
+
+#if _DIMS >= 3
+#ifdef _DEBUG
+        if (self%temp_pos(3,i).lt.0.0) write(*,*) 'np,z<0',np,self%temp_pos(3,i)
+#endif
+        self%temp_pos(3,i) = max(self%temp_pos(3,i),0e0) ! iow ! keep z>=0
+#endif
      enddo
 
      ! correct for periodic domain, if necessary
@@ -96,16 +112,23 @@ subroutine drifters_push_XXX(self, u, v, &
      ! this may need to be adjusted over time... 
      ! [_MPP_NPES is a macro for mpp_npes()]
      if(self%comm%pe_end < 0) self%comm%pe_end = _MPP_NPES - 1
-     max_add_remove = &
-          max(  10, &
-	  &     int(0.2*self%core%npdim/ &
-          &        (self%comm%pe_end-self%comm%pe_beg+1)), &
-	  &     int(np * 2*(self%nx+self%ny)/real(self%nx*self%ny)) &
-	  &  ) 
+!!      max_add_remove = &
+!!           max(  10, &
+!! 	  &     int(0.2*self%core%npdim/ &
+!!           &        (self%comm%pe_end-self%comm%pe_beg+1)), &
+!! 	  &     int(np * 2*(self%nx+self%ny)/real(self%nx*self%ny)) &
+!! 	  &  ) 
+!! write(*,'(a,10i6)') 'pe,max_add_remove,npdim,pe_end,pe_beg,np,nx,ny,int1,int2', &
+!! self%comm%pe,max_add_remove,self%core%npdim,self%comm%pe_end,self%comm%pe_beg,np,self%nx,self%ny, &
+!! int(0.2*self%core%npdim/(self%comm%pe_end-self%comm%pe_beg+1)), &
+!! int(np * 2*(self%nx+self%ny)/real(self%nx*self%ny))
 
      ! copy/move drifters across domain boundaries, if necessary
+! iow ! initial buffer size for data_send and indices_to_remove
+     max_add_remove = 1000
      call drifters_comm_update(self%comm, self%core, self%temp_pos(:,1:np), &
           & remove=self%remove(1:np), max_add_remove=max_add_remove)
+
      np = self%core%np
 
      ! update time
@@ -116,7 +139,13 @@ subroutine drifters_push_XXX(self, u, v, &
      ! resize local arrays if necessary
      call drifters_reset_rk4(self, ermesg=ermesg)
 
-     self%remove = .FALSE. ! by definition no drifters outside data domain
+! iow ! reset rk4_kn=0
+     self%rk4_k1(:,:) = 0e0
+     self%rk4_k2(:,:) = 0e0
+     self%rk4_k3(:,:) = 0e0
+     self%rk4_k4(:,:) = 0e0
+
+     self%remove = .FALSE. ! by definition no drifters outside compute domain
 
      ! prepare for next step...
      call drifters_compute_k(self, self%core%positions, &

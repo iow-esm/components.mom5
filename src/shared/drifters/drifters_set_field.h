@@ -1,6 +1,19 @@
 ! -*-f90-*-
 ! $Id: drifters_set_field.h,v 13.0 2006/03/28 21:38:37 fms Exp $
 
+!<CONTACT EMAIL="torsten.seifert@io-warnemuende.de"> Torsten Seifert
+!</CONTACT>
+!<CONTACT EMAIL="klaus-ketelsen@t-online.de"> Klaus Ketelsen 
+!</CONTACT>
+!<DESCRIPTION>
+!  IOW version 3.0 from 2014/11/28
+!  code changes:  _DEBUG option
+!  clip depth range to minval(z) ... maxval(z) (experimental)
+!  timing & simple+fast call cld_ntrp_get_cell_values_2D by Klaus Ketelsen  
+!  avoid _FLATTEN for 2D drifters
+!</DESCRIPTION>
+! iow ! #define _DEBUG 
+
 subroutine drifters_set_field_XXX(self, index_field, x, y, &
 #if _DIMS >= 3
      & z, &
@@ -23,6 +36,8 @@ subroutine drifters_set_field_XXX(self, index_field, x, y, &
 
   integer i, j, ip, ier, ij(self%core%nd), nsizes(self%core%nd), nf
   real fvals(2**self%core%nd), ts(self%core%nd)
+
+  call mpp_clock_begin(id_fields)
 
   ermesg = ''
   ! only interpolate field if RK step is complete
@@ -74,19 +89,37 @@ subroutine drifters_set_field_XXX(self, index_field, x, y, &
      ts(2) = (self%core%positions(2,ip) - y(j))/(y(j+1) - y(j))
 
 #if _DIMS >= 3
-     call cld_ntrp_locate_cell(z, self%core%positions(3,ip), j, ier)
-     ij(3) = j
-#ifdef _DEBUG
-     if(j<1) then
-        print *,'drifters_set_field_XXX::OUT OF BOUND ERROR. ymin, y, ymax=', minval(y), self%core%positions(2,ip), maxval(y)
+!!     call cld_ntrp_locate_cell_z(z, self%core%positions(3,ip), j, ier)
+!!     ij(3) = j
+!! #ifdef _DEBUG
+!!      if(j<1) then
+!!         print *,'drifters_set_field_XXX::OUT OF BOUND ERROR. zmin, z, zmax=', minval(z), self%core%positions(3,ip), maxval(z)
+!!      endif
+!! #endif
+!!      ts(3) = (self%core%positions(3,ip) - z(j))/(z(j+1) - z(j))
+! iow clip depth range to minval(z) ... maxval(z)
+     if (self%core%positions(3,ip).le.minval(z)) then
+       ij(3) = 1
+       ts(3) = 0.0
+     elseif (self%core%positions(3,ip).ge.maxval(z)) then
+       ij(3) = nsizes(3)
+       ts(3) = 1.0
+     else
+       call cld_ntrp_locate_cell(z, self%core%positions(3,ip), j, ier)
+       ij(3) = j
+       ts(3) = (self%core%positions(3,ip) - z(j))/(z(j+1) - z(j))
      endif
 #endif
-     ts(3) = (self%core%positions(3,ip) - z(j))/(z(j+1) - z(j))
-#endif
 
+#if _DIMS == 2
+     call cld_ntrp_get_cell_values_2D(nsizes, data, ij, fvals, ier)
+#else
      call cld_ntrp_get_cell_values(nsizes, _FLATTEN(data), ij, fvals, ier)
+#endif
      call cld_ntrp_linear_cell_interp(fvals, ts, self%fields(index_field, ip), ier)
   enddo
+
+  call mpp_clock_end(id_fields)
 
 end subroutine drifters_set_field_XXX
 

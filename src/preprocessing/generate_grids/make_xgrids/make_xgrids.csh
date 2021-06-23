@@ -15,7 +15,7 @@
 #######################################################################
   set echo
   set name         = "grid_spec"                                  # name of the grid file will be generated
-  set platform     = "ncrc.intel"                                    # A unique identifier for your platform
+  set platform     = "ifc"                                    # A unique identifier for your platform
   set npes         = 1                                      # number of processors
 #
   set root         = $cwd:h:h:h:h                       # The directory that contains src/ and bin/
@@ -36,7 +36,9 @@
 #--create the executable -----------------------------------------------------------
   if( ! -d $executable:h ) mkdir $executable:h
   cd $executable:h
-  cc -O -o $executable:t $xgrids_code -I$netcdf3_inc_dir -L$netcdf3_lib_dir -lnetcdf -lm
+#  cc -O -o $executable:t $xgrids_code -I$netcdf3_inc_dir -L$netcdf3_lib_dir -lnetcdf -lm
+  icc -I/sw/data/netcdf/SLES_11_SP2/4.2.1-intel/include -O -o $executable:t $xgrids_code  -Wl,-rpath,/sw/data/netcdf/SLES_11_SP2/4.2.1-intel/lib -L/sw/data/netcdf/SLES_11_SP2/4.2.1-intel/lib -lnetcdf -lm
+  exit
 
 #--------------------------------------------------------------------------------------------------------
 # setup directory structure

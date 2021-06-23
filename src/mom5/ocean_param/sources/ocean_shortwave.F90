@@ -247,7 +247,7 @@ end subroutine ocean_irradiance_init
 ! Choose either of the GFDL, CSIRO, JERLOV or External sw_source methods.
 !
 ! </DESCRIPTION>
-subroutine sw_source (Time, Thickness, Dens, T_diag, swflx, swflx_vis, Temp, sw_frac_zt, opacity)
+subroutine sw_source (Time, Thickness, Dens, T_diag, swflx, swflx_vis, Temp, sw_frac_zt, opacity, coszen)
 
   type(ocean_time_type),          intent(in)    :: Time
   type(ocean_thickness_type),     intent(in)    :: Thickness
@@ -258,6 +258,7 @@ subroutine sw_source (Time, Thickness, Dens, T_diag, swflx, swflx_vis, Temp, sw_
   type(ocean_prog_tracer_type),   intent(inout) :: Temp
   real, dimension(isd:,jsd:,:),   intent(inout) :: sw_frac_zt
   real, dimension(isd:,jsd:,:),   intent(inout) :: opacity 
+  real, dimension(isd:,jsd:),     intent(in)    :: coszen 
 
   integer :: i,j,k,tau
 
@@ -279,11 +280,11 @@ subroutine sw_source (Time, Thickness, Dens, T_diag, swflx, swflx_vis, Temp, sw_
   Temp%wrk1(:,:,:) = 0.0
 
   if(use_shortwave_gfdl) then 
-     call sw_source_gfdl (Time, Thickness, T_diag(:), swflx, swflx_vis, index_irr, Temp, sw_frac_zt, opacity)
+     call sw_source_gfdl (Time, Thickness, T_diag(:), swflx, swflx_vis, index_irr, Temp, sw_frac_zt, opacity, coszen)
   elseif(use_shortwave_csiro) then 
      call sw_source_csiro (Time, Thickness, T_diag(:), swflx, index_irr, Temp, sw_frac_zt)
   elseif(use_shortwave_jerlov) then 
-     call sw_source_jerlov (Thickness, T_diag(:), swflx, swflx_vis, index_irr, Temp, sw_frac_zt, opacity)
+     call sw_source_jerlov (Thickness, T_diag(:), swflx, swflx_vis, index_irr, Temp, sw_frac_zt, opacity, coszen)
   elseif(use_shortwave_ext) then
      call sw_source_ext(Time, Thickness, T_diag(:),  swflx, Temp, sw_frac_zt)
   endif 
@@ -507,7 +508,7 @@ subroutine watermass_diag(Time, Temp, Dens)
       enddo
       call diagnose_2d(Time, Grd, id_eta_tend_sw_pen, eta_tend(:,:))
       call diagnose_sum(Time, Grd, Dom, id_eta_tend_sw_pen_glob, eta_tend, cellarea_r)
-  endif
+      endif
 
 end subroutine watermass_diag
 ! </SUBROUTINE>  NAME="watermass_diag"

@@ -473,8 +473,11 @@ contains
     
     call generic_tracer_source(T_prog(indtemp)%field(:,:,:,Time%taup1),&
          T_prog(indsal)%field(:,:,:,Time%taup1), Thickness%rho_dzt(:,:,:,Time%taup1), Thickness%dzt,&
+	 Grid%xt, Grid%yt, &
          hblt_depth, Disd, Djsd, Time%taup1,dtts,Grid%dat, Time%model_time,&
-         nbands, max_wavelength_band, sw_pen_band, opacity_band, Grid%ht, Velocity%current_wave_stress(:,:))
+         nbands, max_wavelength_band, sw_pen_band, opacity_band, Grid%ht, Velocity%current_wave_stress(:,:),&
+         diff_cbt)
+!TN         nbands, max_wavelength_band, sw_pen_band, opacity_band, Grid%ht, Velocity%current_wave_stress(:,:))
 
     call mpp_clock_end(id_clock_gt_source)
     deallocate(max_wavelength_band,sw_pen_band,opacity_band)

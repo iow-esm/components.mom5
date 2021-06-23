@@ -1,6 +1,16 @@
 !FDOC_TAG_GFDL fdoc.pl generated xml skeleton
 ! $Id: drifters.F90,v 20.0 2013/12/14 00:19:02 fms Exp $
 
+!<CONTACT EMAIL="torsten.seifert@io-warnemuende.de"> Torsten Seifert 
+!</CONTACT>
+!<DESCRIPTION>
+!  IOW version 3.0 from 2014/11/28
+!  code changes:
+!  allow at max. 9999 PEs
+!  confine drifters to compute domain
+!  data domain no longer necessary (could be removed)
+!</DESCRIPTION>
+
 #include <fms_platform.h>
 #include "fms_switches.h"
 #define _FLATTEN(A) reshape((A), (/size((A))/) )
@@ -87,6 +97,10 @@ module drifters_mod
 
 #endif
 
+  use mpp_mod,          only : mpp_clock_id, mpp_clock_begin, mpp_clock_end
+  use fms_mod,          only : CLOCK_ROUTINE
+
+
   use drifters_core_mod,  only: drifters_core_type, drifters_core_new, drifters_core_del, assignment(=)
 
   use drifters_input_mod, only: drifters_input_type, drifters_input_new, drifters_input_del, assignment(=)
@@ -99,9 +113,13 @@ module drifters_mod
                                 drifters_comm_set_domain, drifters_comm_gather, drifters_comm_update
 
   use cloud_interpolator_mod, only: cld_ntrp_linear_cell_interp, cld_ntrp_locate_cell, cld_ntrp_get_cell_values
+  use cloud_interpolator_mod, only: cld_ntrp_get_cell_values_2D
 
   implicit none
   private  
+
+  integer,save,public                  :: id_fields
+  integer,save,public                  :: id_compk
 
   public :: drifters_type, assignment(=), drifters_push, drifters_compute_k, drifters_set_field
   public :: drifters_new, drifters_del, drifters_set_domain, drifters_set_pe_neighbors
@@ -119,7 +137,7 @@ module drifters_mod
      type(drifters_input_type) :: input
      type(drifters_io_type)    :: io
      type(drifters_comm_type)  :: comm
-     real    :: dt             ! total dt, over a complete step
+     real    :: dt             ! total dt, over a complete drifter time step
      real    :: time
      ! fields
      real, _ALLOCATABLE :: fields(:,:) _NULL
@@ -166,7 +184,6 @@ module drifters_mod
     module procedure drifters_set_field_2d
     module procedure drifters_set_field_3d
   end interface
-
   
 
 contains
@@ -206,8 +223,8 @@ contains
     character(len=*), intent(in)  :: output_file
     character(len=*), intent(out) :: ermesg
     
-    integer nd, nf, npdim, i
-    character(len=6) :: pe_str
+    integer nd, nf, np, npdim, i
+    character(len=4) :: pe_str ! iow ! max. 9999 PEs
 
     ermesg = ''
 
@@ -227,13 +244,14 @@ contains
     ! number of fields
     nf = size(self%input%field_names)
 
-    ! one output file per PE
-    pe_str = '    '
-    write(pe_str, '(i6)') _MPP_PE
-    pe_str = adjustr(pe_str)
-    do i = 1, 5
-       if(pe_str(i:i)==' ') pe_str(i:i)='0'
-    enddo
+    ! one output file per PE 
+    write(pe_str, '(i4.4)') _MPP_PE ! iow ! max. 9999 PEs
+!!    pe_str = '    '
+!!    write(pe_str, '(i6)') _MPP_PE
+!!    pe_str = adjustr(pe_str)
+!!    do i = 1, 3
+!!       if(pe_str(i:i)==' ') pe_str(i:i)='0'
+!!    enddo
     call drifters_io_new(self%io, output_file//'.'//pe_str, nd, nf, ermesg)
     if(ermesg/='') return
 
@@ -523,6 +541,12 @@ contains
     if(present(ymin_glob)) self%comm%ygmin = ymin_glob
     if(present(ymax_glob)) self%comm%ygmax = ymax_glob
 
+! iow ! debugging needs compile option CPPFLAGS = -DNO_DEV_NULL
+    if (self%core%debug) then
+      write(0,*) 'drifters_set_domain data domain on PE',self%comm%pe,self%comm%xdmin,self%comm%xdmax,self%comm%ydmin,self%comm%ydmax
+      write(0,*) 'drifters_set_domain comp domain on PE',self%comm%pe,self%comm%xcmin,self%comm%xcmax,self%comm%ycmin,self%comm%ycmax
+    endif
+
     ! Note: the presence of both xgmin/xgmax will automatically set the 
     ! periodicity flag
     if(present(xmin_glob) .and. present(xmax_glob)) self%comm%xperiodic = .TRUE.
@@ -701,8 +725,11 @@ contains
     do i = 1, nptot
        x = self%input%positions(1,i)
        y = self%input%positions(2,i)
-       if(x >= self%comm%xdmin .and. x <= self%comm%xdmax .and. &
-        & y >= self%comm%ydmin .and. y <= self%comm%ydmax) then
+!!        if(x >= self%comm%xdmin .and. x <= self%comm%xdmax .and. &
+!!         & y >= self%comm%ydmin .and. y <= self%comm%ydmax) then
+! iow ! distribute onto compute domain
+       if(x >= self%comm%xcmin .and. x <= self%comm%xcmax .and. &
+        & y >= self%comm%ycmin .and. y <= self%comm%ycmax) then
 
           self%core%np = self%core%np + 1
           self%core%positions(1:nd, self%core%np) = self%input%positions(1:nd, i)
@@ -844,8 +871,8 @@ contains
 !  </OVERVIEW>
 !  <DESCRIPTION>
 !  Velocity axis components may be located on different grids or cell faces. For instance, zonal (u)
-!  and meridional (v) velcity components are staggered by half a cell size in Arakawa's C and D grids.
-!  This call will set individual axes for each components do as to allow interpolation of the velocity
+!  and meridional (v) velocity components are staggered by half a cell size in Arakawa's C and D grids.
+!  This call will set individual axes for each components so as to allow interpolation of the velocity
 !  field on arbitrary positions.
 !  </DESCRIPTION>
 !  <TEMPLATE>
@@ -950,7 +977,7 @@ contains
 !  Set boundaries of "data" and "compute" domains
 !  </OVERVIEW>
 !  <DESCRIPTION>
-!  Each particle will be tracked sol long is it is located in the data domain. 
+!  Each particle will be tracked so long as it is located in the data domain. 
 !  </DESCRIPTION>
 !  <TEMPLATE>
 !   call   drifters_set_domain_bounds(self, domain, backoff_x, backoff_y, ermesg)
@@ -991,6 +1018,7 @@ contains
        ermesg = 'drifters_set_domain_bounds: ERROR "v"-component axes not set'
        return
     endif
+! iow ! why a xw,yw test for self%xv, self%yv and not for self%xu, self%yu above ?
     if(_ALLOCATED(self%xw) .and. _ALLOCATED(self%yw)) then
        call drifters_comm_set_domain(self%comm, domain, self%xv, self%yv, backoff_x, backoff_y)
     endif
@@ -998,7 +1026,7 @@ contains
     
   end subroutine drifters_set_domain_bounds
 
-  !============================================================================
+!============================================================================
 ! <SUBROUTINE NAME="drifters_positions2lonlat">
 !  <OVERVIEW>
 !  Interpolates positions onto longitude/latitude grid.
@@ -1234,6 +1262,7 @@ contains
        deallocate(self%remove, stat=ier)
        allocate(self%remove(self%core%npdim))
        self%remove = .FALSE.
+
     endif
           
     if(size(self%temp_pos, 2) < self%core%np) then
@@ -1436,7 +1465,7 @@ program test
   call mpp_declare_pelist( (/ (i, i=pe_beg, pe_end) /), '_drifters')
 #endif
 
-  ! this sumulates a run on a subset of PEs
+  ! this simulates a run on a subset of PEs
   if(pe >= pe_beg .and. pe <= pe_end) then 
      
 #ifndef _SERIAL
@@ -1500,7 +1529,7 @@ program test
           & ymin_comp=y(jsc  ), ymax_comp=y(jec+1), &
           & xmin_data=x(isd  ), xmax_data=x(ied  ), &
           & ymin_data=y(jsd  ), ymax_data=y(jed  ), &
-          !!$       & xmin_glob=xmin    , xmax_glob=xmax    , & ! periodicity in x
+!!$       & xmin_glob=xmin    , xmax_glob=xmax    , & ! periodicity in x
 !!$       & ymin_glob=ymin    , ymax_glob=ymax    , & ! periodicity in y
      & ermesg=ermesg)
      if(ermesg/='') call my_error_handler(ermesg)

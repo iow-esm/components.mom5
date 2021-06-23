@@ -17,6 +17,37 @@ module ocean_wave_mod
 ! for calculation of the coupled current-wave action on sediment.
 ! Swell is not included in this model.
 !
+!<NAMELIST NAME="ocean_wave_nml">
+! <DATA NAME="calc_stokes_drift" TYPE="logical">
+! Set to calculate Stokes drift induced by waves at sea surface. 
+! Default calc_stokes_drift=.false.
+! </DATA> 
+! <DATA NAME="stokes_fac" UNITS="none" TYPE="real">
+! Enhancement factor for Stokes drift with respect to monochromatic wave approximation,
+! i.e. (pi/4)*wave_freq*wave_number*wave_height**2 (here: wave_p, wave_k, height).
+! Webb, Fox-Kemper (2011) derived stokes_fac=(1/0.68)**3 and stokes_fac=(1/0.6156)**3
+! for JONSWAP and Pierson-Moskowitz (PM) wave sprectra.
+! Donelan spectrum is near to JONSWAP if fetch limited and near PW if saturated.
+! Default stokes_fac=1.0
+! </DATA> 
+! <DATA NAME="spread_loss" UNITS="none" TYPE="real">
+! Loss factor for stokes drift due to directional spread, after Webb, Fox-Kemper (2011)
+! around 0.77-0.95 for a Donelan wave spectrum.  
+! Default spread_loss=1.0
+! </DATA> 
+! <DATA NAME="crit_ice" UNITS="none" TYPE="real">
+! Critical ice mass [kg/m2] for reduction of stokes drift,
+! corresponding to ice concentration criterion after Liungman, Mattsson (2011).
+! Default crit_ice=50
+! </DATA> 
+! <DATA NAME="stokes_p_lim" UNITS="1/sec" TYPE="real">
+! Limiting wave frequency for stokes drift.
+! Damp Stokes drift exponentially to asymtotic background const/wave_freq
+! if wave_p >= stokes_p_lim (small, high freq. waves). 
+! Default stokes_p_lim=1.0
+! </DATA> 
+!</NAMELIST>
+!
 ! All fields are defined at tracer grid, for later use in sediment dynamics
 ! in such modules as ocean_shared/generic_tracers/generic_ERGOM.F90
 ! </DESCRIPTION>
@@ -34,6 +65,16 @@ module ocean_wave_mod
 ! Hughes, S. A. 1984. "TMA Shallow-Water Spectrum:
 !      Description and Application," Technical Report CERC-84-7, 
 !      US Army Engineer Waterways Experiment Station, Vicksburg, Miss.
+! </REFERENCE>
+!
+!<REFERENCE>
+! Webb, A., Fox-Kemper, B., 2011. "Wave spectral moments and Stokes drift estimation",
+!      Ocean Modelling, 40, 273-288.
+! </REFERENCE>
+!
+!<REFERENCE>
+! Liungman, O., Mattsson, J. 2011. " Scientific Documentation od Seatrack Web; physical processes
+! algorithms and references, 32pp. https://stw-helcom.smhi.se 
 ! </REFERENCE>
 !
 ! </INFO>
@@ -75,7 +116,7 @@ type(ocean_domain_type), pointer   :: Dom =>NULL()
 type(ocean_grid_type), pointer     :: Grd =>NULL()
 
 character(len=128) :: &
-     version='$Id: ocean_wave.F90,v 20.0 2013/12/14 00:17:26 fms Exp $'
+     version='$Id: ocean_wave.F90,v 20.0 2013/12/14 00:17:26 fms Exp IOW$'
 character (len=128) :: tagname = &
      '$Name: tikal $'
 
@@ -97,17 +138,6 @@ real, dimension(isd:ied,jsd:jed)  :: windx, windy      !wind fields for surface 
 real, dimension(isd:ied,jsd:jed)  :: sn,cs,c,s         !direction fields for wave propagation
 real, dimension(isc:iec,jsc:jec)  :: wrk1, wrk2        !work space in the compute domain
 #endif
-real     :: wavedamp = -10.
-logical  :: module_is_initialized = .FALSE.
-logical  :: first_call            = .TRUE.
-logical  :: damp_where_ice        = .TRUE.
-logical  :: filter_wave_mom       = .TRUE.
-logical  :: write_a_restart       = .TRUE.
-logical  :: use_this_module       = .FALSE.
-logical  :: use_TMA               = .TRUE.
-logical  :: debug_this_module     = .FALSE. ! for debugging--prints out a lot of checksums 
-integer  :: tau_w, taup1_w
-real     :: cgmax, gridmin, dttw, dtts, wave_damp
 
 integer  :: id_windx  =-1 
 integer  :: id_windy  =-1
@@ -116,21 +146,45 @@ integer  :: id_ymom   =-1
 integer  :: id_wave_k =-1
 integer  :: id_height =-1
 integer  :: id_wave_p =-1
+integer  :: id_xstokes =-1
+integer  :: id_ystokes =-1
 integer  :: id_init
 integer  :: id_diag
 
 ! for write statements 
 integer :: stdoutunit,stdlogunit 
 
-
 ! for restart
 integer                       :: id_restart(2) = 0
 type(restart_file_type), save :: wave_restart
 
+logical  :: module_is_initialized = .false.
+logical  :: first_call            = .true.
+integer  :: tau_w, taup1_w
+real     :: cgmax, gridmin, dttw, dtts, wave_damp
 
+! define namelist
+logical  :: use_this_module       = .false.
+logical  :: debug_this_module     = .false.     ! for debugging--prints out a lot of checksums 
+logical  :: write_a_restart       = .true.
 
-namelist /ocean_wave_nml/ wavedamp, damp_where_ice, write_a_restart, debug_this_module &
-                          ,use_TMA, filter_wave_mom, use_this_module
+logical  :: use_TMA               = .true.
+logical  :: filter_wave_mom       = .true.
+logical  :: damp_where_ice        = .true.
+real     :: wavedamp = -10.
+
+real     :: stokes_drift, stokes_limit, r_ice   ! buffers for Stokes drift calculation 
+logical  :: calc_stokes_drift = .false.         ! choose monochromatic wave approximation for Stokes drift 
+real     :: stokes_fac   = 1.0                  ! factor to enhance Stokes drift according to wave spectrum 
+real     :: spread_loss  = 1.0                  ! loss factor of Stokes drift due to directional spread 
+real     :: crit_ice     = 50.0                 ! crit. ice mass [kg/m²] for reduction of Stokes drift
+real     :: stokes_p_lim = 1.0                  ! limiting wave freq. [sec] (small, high freq. waves) 
+real     :: stokes_a_lim = 0.005365             ! Donelan wave spectrum asymptotic limit of Stokes drift
+                                                ! damp Stokes drift exponentially to stokes_a_lim/wave_freq
+                                                ! if wave_p >= stokes_p_lim
+namelist /ocean_wave_nml/ use_this_module, debug_this_module, write_a_restart &
+         , use_TMA, filter_wave_mom, damp_where_ice, wavedamp  &
+         , calc_stokes_drift, stokes_fac, spread_loss, crit_ice, stokes_p_lim, stokes_a_lim
 
 contains
 
@@ -205,6 +259,18 @@ subroutine ocean_wave_init(Grid, Domain, Waves, Time, Time_steps, Ocean_options,
   else
     write(stdoutunit,'(a)') '==>Note: not using TMA-spectrum for shallow areas'  
   endif 
+  if(calc_stokes_drift) then 
+    write(stdoutunit,*) '==> Note: calculating Stokes drift at sea surface by monochromatic wave approximation'  
+    write(stdoutunit,*) '==> Stokes drift enhanced by stokes_fac =',stokes_fac 
+    write(stdoutunit,*) '==> Stokes drift reduced by spread_loss =',spread_loss
+    stokes_fac = 0.25*pi*stokes_fac*spread_loss ! collect all constant factors
+    write(stdoutunit,*) '==> Stokes drift damped out by crit_ice =',crit_ice  
+    write(stdoutunit,*) '==> Stokes drift damped if wave freq.  >=',stokes_p_lim
+    stokes_a_lim = stokes_fac*stokes_a_lim ! scale the asymtotic limit
+    write(stdoutunit,*) '==> Stokes drift asymptotic limit =',stokes_a_lim,'/wave_freq.'  
+  else
+    write(stdoutunit,'(a)') '==>Note: no Stokes drift; invoke by calc_stokes_drift = .true.'  
+  endif 
 
   if(.not. write_a_restart) then 
     write(stdoutunit,'(a)') '==>Note: running ocean_wave with write_a_restart=.false.'
@@ -224,6 +290,11 @@ subroutine ocean_wave_init(Grid, Domain, Waves, Time, Time_steps, Ocean_options,
   allocate(Waves%wave_k(isd:ied,jsd:jed))
   allocate(Waves%height(isd:ied,jsd:jed))
   allocate(Waves%wave_p(isd:ied,jsd:jed))
+  if(calc_stokes_drift) then 
+    allocate(Waves%stokes(isd:ied,jsd:jed))
+    allocate(Waves%xstokes(isd:ied,jsd:jed))
+    allocate(Waves%ystokes(isd:ied,jsd:jed))
+  endif 
 
   allocate(windx(isd:ied,jsd:jed))
   allocate(windy(isd:ied,jsd:jed))
@@ -240,6 +311,11 @@ subroutine ocean_wave_init(Grid, Domain, Waves, Time, Time_steps, Ocean_options,
   Waves%wave_k = 0.0
   Waves%height = 0.0
   Waves%wave_p = 0.0
+  if(calc_stokes_drift) then 
+    Waves%stokes  = 0.0
+    Waves%xstokes = 0.0
+    Waves%ystokes = 0.0
+  endif 
   windx        = 0.0
   windy        = 0.0
   sn           = 0.0
@@ -271,6 +347,15 @@ subroutine ocean_wave_init(Grid, Domain, Waves, Time, Time_steps, Ocean_options,
   id_wave_k = register_diag_field ('ocean_model', 'wave_k', Grd%tracer_axes(1:2), &
               Time%model_time, 'wave number', '1/m',                              &
               missing_value=missing_value, range=(/-1e3,1e3/))
+  if(calc_stokes_drift) then 
+! output only Stokes drift components
+     id_xstokes = register_diag_field ('ocean_model', 'xstokes', Grd%tracer_axes(1:2), &
+              Time%model_time, 'zonal Stokes drift on t-grid', 'm/s',                  &
+              missing_value=missing_value, range=(/-1e3,1e3/))
+     id_ystokes = register_diag_field ('ocean_model', 'ystokes', Grd%tracer_axes(1:2), &
+              Time%model_time, 'meridional Stokes drift on t-grid', 'm/s',             &
+              missing_value=missing_value, range=(/-1e3,1e3/))
+  endif 
 
   ! initialise the time stepping
   tau_w   = 0
@@ -315,7 +400,7 @@ subroutine ocean_wave_model(Time, Waves, Ice_ocean_boundary)
 
   integer :: i,j
   integer :: ndtt, nww
-  real    :: wmax, cspeed, dtwmax
+  real    :: wmax, cspeed, dtwmax, cm
 
   if ( .not.module_is_initialized ) return  
 
@@ -344,8 +429,8 @@ subroutine ocean_wave_model(Time, Waves, Ice_ocean_boundary)
      enddo
   enddo
 
-  call mpp_update_domains (windx, Dom%domain2d)
-  call mpp_update_domains (windy, Dom%domain2d)
+! iow ! only one mpp_update_domains
+  call mpp_update_domains (windx,windy, Dom%domain2d)
 
   ! wavediag is needed to initialize wave_p      
   if (first_call) then
@@ -365,7 +450,7 @@ subroutine ocean_wave_model(Time, Waves, Ice_ocean_boundary)
         endif
      enddo
   enddo
-  call mpp_max(wmax )
+  call mpp_max(wmax)
   dtwmax=0.5*gridmin/sqrt_2/wmax     
   ndtt=int(dtts/dtwmax)+1   
   
@@ -380,22 +465,51 @@ subroutine ocean_wave_model(Time, Waves, Ice_ocean_boundary)
     taup1_w=abs(taup1_w-1)  
     call ocean_wave_diag(Waves)  
     call ocean_wave_prop(Waves, Ice_ocean_boundary)  
-!    call ocean_wave_prop(Time)  
   enddo      
 ! filtering xmom and ymom       
 !  if (mod(itt,10).eq.0) then
   if(filter_wave_mom) call ocean_wave_filter(Waves, dtts)
 !  endif
 
+! iow ! 'monochromatic' wave approximation of Stokes drift from wave_p, wave_k & height
+! Stokes drift on compute domain as a 'diagnostic' 
+  if (calc_stokes_drift) then
+     do j=jsc,jec
+        do i=isc,iec
+           if (Ice_ocean_boundary%mi(i,j) .le. crit_ice ) then
+             r_ice = 1.0 - Ice_ocean_boundary%mi(i,j)/crit_ice
+             stokes_drift = Waves%wave_p(i,j)*Waves%wave_k(i,j)*Waves%height(i,j)*Waves%height(i,j) &
+                          * stokes_fac * r_ice
+             if (Waves%wave_p(i,j) .ge. stokes_p_lim) then
+               stokes_limit = stokes_a_lim/Waves%wave_p(i,j) ! asymtotic limit
+               stokes_drift = (stokes_drift - stokes_limit)*exp(stokes_p_lim-Waves%wave_p(i,j)) + stokes_limit
+             endif
+             cm = sqrt(Waves%xmom(i,j,taup1_w)**2+Waves%ymom(i,j,taup1_w)**2+epsln)
+             Waves%stokes(i,j)  = stokes_drift
+             Waves%xstokes(i,j) = stokes_drift*Waves%xmom(i,j,taup1_w)/cm
+             Waves%ystokes(i,j) = stokes_drift*Waves%ymom(i,j,taup1_w)/cm
+           else
+             Waves%stokes(i,j)  = 0.0
+             Waves%xstokes(i,j) = 0.0
+             Waves%ystokes(i,j) = 0.0
+           endif
+        enddo
+     enddo
+    call mpp_update_domains (Waves%stokes(:,:), Dom%domain2d, complete=.false.)
+    call mpp_update_domains (Waves%xstokes(:,:),Waves%ystokes(:,:), Dom%domain2d, complete=.true.)
+  endif
+
   call diagnose_2d(Time, Grd, id_windx, windx(:,:))
   call diagnose_2d(Time, Grd, id_windy, windy(:,:))
-  if (id_xmom  > 0) call diagnose_2d(Time, Grd, id_xmom, Waves%xmom(:,:,taup1_w)*grav)
-  if (id_ymom  > 0) call diagnose_2d(Time, Grd, id_ymom, Waves%ymom(:,:,taup1_w)*grav)
+  if (id_xmom > 0) call diagnose_2d(Time, Grd, id_xmom, Waves%xmom(:,:,taup1_w)*grav)
+  if (id_ymom > 0) call diagnose_2d(Time, Grd, id_ymom, Waves%ymom(:,:,taup1_w)*grav)
   call diagnose_2d(Time, Grd, id_height, Waves%height(:,:))
   call diagnose_2d(Time, Grd, id_wave_p, Waves%wave_p(:,:))
   call diagnose_2d(Time, Grd, id_wave_k, Waves%wave_k(:,:))
+  if (id_xstokes > 0) call diagnose_2d(Time, Grd, id_xstokes, Waves%xstokes(:,:))
+  if (id_ystokes > 0) call diagnose_2d(Time, Grd, id_ystokes, Waves%ystokes(:,:))
 
-  if(debug_this_module) write(stdoutunit,*) 'ending ocean_wave_model'
+  if (debug_this_module) write(stdoutunit,*) 'ending ocean_wave_model'
     
   return
 end subroutine ocean_wave_model
@@ -526,14 +640,14 @@ subroutine ocean_wave_prop(Waves, Ice_ocean_boundary)
         if(diff >= 0.) then
            damp = exp(wave_damp*diff)
            Waves%xmom(i,j,taup1_w)=Waves%xmom(i,j,taup1_w)*damp   
-           Waves%ymom(i,j,taup1_w)=Waves%ymom(i,j,taup1_w)*damp   
+           Waves%ymom(i,j,taup1_w)=Waves%ymom(i,j,taup1_w)*damp
         endif
       enddo
     enddo
   endif
 
-  call mpp_update_domains (Waves%xmom(:,:,taup1_w), Dom%domain2d)
-  call mpp_update_domains (Waves%ymom(:,:,taup1_w), Dom%domain2d)
+! iow ! only one mpp_update_domains
+  call mpp_update_domains (Waves%xmom(:,:,taup1_w),Waves%ymom(:,:,taup1_w), Dom%domain2d)
 
   if(debug_this_module) then 
      write(stdoutunit,*) 'ocean_wave_model: end wave_prop'
@@ -583,7 +697,7 @@ subroutine ocean_wave_diag(Waves)
 ! calculate  omega=2*pi*f_p
          fphilf=const1*(max(epsln,uhilf)**2/(cm+epsln)**3)**seventh
          if (fphilf*uhilf.le.flimit) fphilf=(const2*cm)**(-third)      
-         Waves%wave_p(i,j)=fphilf
+         Waves%wave_p(i,j)=fphilf*Grd%tmask(i,j,1)
          omega = twopi*Waves%wave_p(i,j)  
          omh   = omega**2*depth/grav
       
@@ -601,7 +715,6 @@ subroutine ocean_wave_diag(Waves)
             Waves%height(i,j)=Waves%height(i,j)*sqrt(1.0-0.5*(2.0-sqrt(omh))**2)
           endif
         endif
- 
       enddo
     enddo    
 
@@ -619,7 +732,7 @@ subroutine ocean_wave_diag(Waves)
 ! calculate  omega=2*pi*f_p
          fphilf=const1*(max(epsln,uhilf)**2/(cm+epsln)**3)**seventh
          if (fphilf*uhilf.le.flimit) fphilf=(const2*cm)**(-third)      
-         Waves%wave_p(i,j)=fphilf
+         Waves%wave_p(i,j)=fphilf*Grd%tmask(i,j,1)
          omega = twopi*Waves%wave_p(i,j)  
          omh   = omega**2*depth/grav
       
@@ -629,7 +742,6 @@ subroutine ocean_wave_diag(Waves)
 ! calculate significant wave height
 ! height=4*sigma
         Waves%height(i,j)=4.0*sqrt(grav*cm/(omega+epsln))
- 
       enddo
     enddo    
   
@@ -638,7 +750,6 @@ subroutine ocean_wave_diag(Waves)
   if(debug_this_module) then 
       write(stdoutunit,*) 'ocean_wave_model: end wave_diag'
   endif 
-
   
   call mpp_clock_end(id_diag)
 
@@ -699,8 +810,8 @@ subroutine ocean_wave_filter(Waves, dttw)
     enddo
   enddo
 
-  call mpp_update_domains (Waves%xmom(:,:,taup1_w), Dom%domain2d)
-  call mpp_update_domains (Waves%ymom(:,:,taup1_w), Dom%domain2d)
+! iow ! only one mpp_update_domains
+  call mpp_update_domains (Waves%xmom(:,:,taup1_w),Waves%ymom(:,:,taup1_w), Dom%domain2d)
 
   if(debug_this_module) then 
       write(stdoutunit,*) 'ocean_wave_model: ending wave_filter'
@@ -738,8 +849,8 @@ subroutine read_wave(Waves)
   write (stdoutunit,'(a)')  &
   '  Expecting only one time record for each restart field.'
   
-  call mpp_update_domains(Waves%xmom(:,:,taup1_w), Dom%domain2d)
-  call mpp_update_domains(Waves%ymom(:,:,taup1_w), Dom%domain2d)
+! iow ! only one mpp_update_domains
+  call mpp_update_domains(Waves%xmom(:,:,taup1_w),Waves%ymom(:,:,taup1_w), Dom%domain2d)
   Waves%xmom(:,:,tau_w) = Waves%xmom(:,:,taup1_w)
   Waves%ymom(:,:,tau_w) = Waves%ymom(:,:,taup1_w)
   
@@ -823,9 +934,14 @@ subroutine wave_chksum(Waves, index)
 
   call write_chksum_2d('xmom', Waves%xmom(COMP,index))
   call write_chksum_2d('ymom', Waves%ymom(COMP,index))
-  call write_chksum_2d('wave_k', Waves%wave_k(COMP))
   call write_chksum_2d('wave_p', Waves%wave_p(COMP))
-
+  call write_chksum_2d('wave_k', Waves%wave_k(COMP))
+  call write_chksum_2d('height', Waves%height(COMP))
+  if(calc_stokes_drift) then 
+    call write_chksum_2d('stokes',  Waves%stokes(COMP))
+    call write_chksum_2d('xstokes', Waves%xstokes(COMP))
+    call write_chksum_2d('ystokes', Waves%ystokes(COMP))
+  endif
 end subroutine wave_chksum 
 ! </SUBROUTINE> NAME="wave_chksum"
 

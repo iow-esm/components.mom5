@@ -25,11 +25,17 @@ module wave_types_mod
     real, dimension(:,:),  _ALLOCATABLE:: wave_k      _NULL !wave number (1/m)
     real, dimension(:,:),  _ALLOCATABLE:: height      _NULL !significant wave height (m)
     real, dimension(:,:),  _ALLOCATABLE:: wave_p      _NULL !peak frequency at time level taup1
+    real, dimension(:,:),  _ALLOCATABLE:: stokes      _NULL !Stokes drift speed
+    real, dimension(:,:),  _ALLOCATABLE:: xstokes     _NULL !Stokes drift east component  on t-grid
+    real, dimension(:,:),  _ALLOCATABLE:: ystokes     _NULL !Stokes drift north component on t-grid
 #else
     real, dimension(isd:ied,jsd:jed,2) :: xmom, ymom	    !x & y-component of local wave momentum
     real, dimension(isd:ied,jsd:jed)   :: wave_k	    !wave number (1/m)
     real, dimension(isd:ied,jsd:jed)   :: height	    !significant wave height (m)
     real, dimension(isd:ied,jsd:jed)   :: wave_p	    !peak frequency at time level taup1
+    real, dimension(isd:ied,jsd:jed)   :: stokes            !Stokes drift speed
+    real, dimension(isd:ied,jsd:jed)   :: xstokes           !Stokes drift east component  on t-grid
+    real, dimension(isd:ied,jsd:jed)   :: ystokes           !Stokes drift north component on t-grid
 #endif
 
   end type ocean_wave_type

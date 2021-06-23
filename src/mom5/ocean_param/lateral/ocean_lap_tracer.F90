@@ -86,9 +86,36 @@ module ocean_lap_tracer_mod
 !  <DATA NAME="verbose_init" TYPE="logical">
 !  For verbose writes during initialization 
 !  </DATA> 
+!
+!  <DATA NAME="use_stokes_diffusion" TYPE="logical">
+!  Enables diffusion introduced by the stokes drift. Requires a wave model running.
+!  Default use_stokes_diffusion=.false.
+!  </DATA> 
+!
+!  <DATA NAME="limit_stokes_diffusion_hblt" TYPE="logical">
+!  Limits the vertical extent of the horizontal mixing by stokes drift 
+!  diffusion to limit_stokes_diffusion_hblt_factor times the mixed layer 
+!  depth obtained from the vertical mixing scheme. Default=.true.
+!  </DATA> 
+!
+!  <DATA NAME="limit_stokes_diffusion_hblt_factor" TYPE="real">
+!  Fraction of the mixed-layer depth in which stokes drift diffusion is applied.
+!  Default: limit_stokes_diffusion_hblt_factor=1.0
+!  </DATA> 
+!
+!  <DATA NAME="stokes_diffusion_min_i" TYPE="integer">
+!  Minimum i where stokes drift diffusion starts (exclude open boundary)
+!  Default: stokes_diffusion_min_i=0
+!  </DATA> 
+!
+!  <DATA NAME="stokes_diffusion_max_k" TYPE="integer">
+!  Maximum k at which stokes drift diffusion is still calculated (make it faster)
+!  Default: stokes_diffusion_max_k=10000
+!  </DATA> 
+!
 !</NAMELIST>
 !
-use constants_mod,       only: epsln
+use constants_mod,       only: epsln, pi
 use diag_manager_mod,    only: register_diag_field, register_static_field
 use fms_mod,             only: write_version_number, open_namelist_file, close_file, check_nml_error
 use fms_mod,             only: FATAL, NOTE, stdout, stdlog, read_data
@@ -102,9 +129,9 @@ use ocean_operators_mod,  only: FDX_T, FDY_T
 use ocean_parameters_mod, only: missing_value
 use ocean_types_mod,      only: ocean_grid_type, ocean_domain_type, ocean_time_type
 use ocean_types_mod,      only: ocean_thickness_type, ocean_prog_tracer_type, ocean_options_type
-use ocean_workspace_mod,  only: wrk1
-use ocean_util_mod,       only: diagnose_3d
-
+use ocean_workspace_mod,  only: wrk1 
+use ocean_util_mod,       only: diagnose_2d, diagnose_3d
+use wave_types_mod,       only: ocean_wave_type
 implicit none
 
 private
@@ -112,10 +139,15 @@ private
 public ocean_lap_tracer_init
 public lap_tracer
 
-real    :: alap              = 0.0e3  ! tracer diffusivity (m^2/sec)
-real    :: vel_micom         = 0.0    ! constant velocity scale (m/s) for setting micom diffusivity  
-logical :: tracer_mix_micom  =.false. ! if true, diffusivity made a function of the grid spacing
-logical :: verbose_init      =.true.  ! for verbose writes during initialization 
+real    :: alap                 = 0.0e3  ! tracer diffusivity (m^2/sec)
+real    :: vel_micom            = 0.0    ! constant velocity scale (m/s) for setting micom diffusivity  
+logical :: tracer_mix_micom     =.false. ! if true, diffusivity made a function of the grid spacing
+logical :: verbose_init         =.true.  ! for verbose writes during initialization 
+logical :: use_stokes_diffusion =.false. ! enables diffusion introduced by the stokes drift
+logical :: limit_stokes_diffusion_hblt = .true. ! Limits the vertical extent of the stokes drift horizontal mixing by limit_stokes_diffusion_hblt_factor*hblt
+real    :: limit_stokes_diffusion_hblt_factor = 1.0 
+integer :: stokes_diffusion_min_i = 0     ! i index where stokes diffusion starts (exclude open boundary)
+integer :: stokes_diffusion_max_k = 10000 ! deepest k index where stokes diffusion is still applied
 
 ! for diagnostics 
 logical :: used
@@ -123,10 +155,12 @@ integer :: id_ah_laplacian=-1
 integer, dimension(:), allocatable  :: id_xflux_diff
 integer, dimension(:), allocatable  :: id_yflux_diff
 integer, dimension(:), allocatable  :: id_h_diffuse
+integer, dimension(:), allocatable  :: id_lap_tracer_th_tendency
 
 real, dimension(:,:,:), allocatable :: diff_cet ! diffusivity for eastern face of T cell (m^2/s)
 real, dimension(:,:,:), allocatable :: diff_cnt ! diffusivity for northern face of T cell (m^2/s)
 real, dimension(:,:,:), allocatable :: diffusivity_mask ! 3d mask to selectively apply diffusion
+real, dimension(:,:,:), allocatable :: stokesdiffusion_et, stokesdiffusion_nt
 
 character(len=128) :: version=&
      '$Id: ocean_lap_tracer.F90,v 20.0 2013/12/14 00:14:20 fms Exp $'
@@ -149,7 +183,10 @@ logical :: module_is_initialized = .FALSE.
 logical :: have_obc=.false.
 
 namelist /ocean_lap_tracer_nml/ use_this_module, alap, tracer_mix_micom, vel_micom, verbose_init, &
-                                read_diffusivity_mask, horz_z_diffuse, horz_s_diffuse
+                                read_diffusivity_mask, horz_z_diffuse, horz_s_diffuse, &
+				use_stokes_diffusion, &
+				limit_stokes_diffusion_hblt, limit_stokes_diffusion_hblt_factor, &
+				stokes_diffusion_min_i, stokes_diffusion_max_k
 
 contains
 
@@ -205,7 +242,7 @@ ierr = check_nml_error(io_status,'ocean_lap_tracer_nml')
   write (stdoutunit,'(/)')
   write (stdoutunit,ocean_lap_tracer_nml)  
   write (stdlogunit,ocean_lap_tracer_nml)
-
+  
   call get_local_indices(Domain, isd, ied, jsd, jed, isc, iec, jsc, jec)
   nk = Grid%nk
  
@@ -248,6 +285,9 @@ ierr = check_nml_error(io_status,'ocean_lap_tracer_nml')
       write(stdoutunit,*)'   So will not produce any lateral tracer diffusion.'
   endif
 
+  if(use_stokes_diffusion) then 
+      write(stdoutunit,*)'==>Note: Adding horizontal diffusion induced by Stokes drift'
+  endif
 
   write(stdoutunit,'(/a,f10.2)')'==> Note from ocean_lap_tracer_mod: using forward time step (secs)', dtime 
 
@@ -260,7 +300,11 @@ ierr = check_nml_error(io_status,'ocean_lap_tracer_nml')
   allocate (diff_cnt(isd:ied,jsd:jed,nk))
   allocate (fx(isd:ied,jsd:jed,nk))
   allocate (fy(isd:ied,jsd:jed,nk))  
-
+  if(use_stokes_diffusion) then
+     allocate (stokesdiffusion_et(isd:ied,jsd:jed,nk))
+     allocate (stokesdiffusion_nt(isd:ied,jsd:jed,nk))
+  endif
+  
   diff_cet(:,:,:) = alap
   diff_cnt(:,:,:) = alap
   fx = 0.0
@@ -320,13 +364,16 @@ ierr = check_nml_error(io_status,'ocean_lap_tracer_nml')
                     'm^2/sec', missing_value=missing_value, range=(/-10.0,1.e20/))
   call diagnose_3d(Time, Grd, id_ah_laplacian, diff_cet(:,:,:))
 
+
   ! register for diagnostics manager 
   allocate (id_xflux_diff(num_prog_tracers))
   allocate (id_yflux_diff(num_prog_tracers))
   allocate (id_h_diffuse(num_prog_tracers))
+  allocate (id_lap_tracer_th_tendency(num_prog_tracers))
   id_xflux_diff = -1
   id_yflux_diff = -1
   id_h_diffuse  = -1
+  id_lap_tracer_th_tendency = -1
 
   do n=1,num_prog_tracers
 
@@ -342,6 +389,10 @@ ierr = check_nml_error(io_status,'ocean_lap_tracer_nml')
          id_h_diffuse(n) = register_diag_field ('ocean_model',          &
               trim(T_prog(n)%name)//'_h_diffuse', Grd%tracer_axes(1:3), &
               Time%model_time, 'horz-diffusion of heat', 'Watt/m^2',    &
+              missing_value=missing_value, range=(/-1.e16,1.e16/))
+	 id_lap_tracer_th_tendency(n) = register_diag_field ('ocean_model',          &
+              trim(T_prog(n)%name)//'_lap_tracer_th_tendency', Grd%tracer_axes(1:3), &
+              Time%model_time, 'layer integral tendency of heat by lap_tracer', 'Watt/m^2',    &
               missing_value=missing_value, range=(/-1.e16,1.e16/))         
      else
          id_xflux_diff(n) = register_diag_field ('ocean_model',                       &
@@ -355,12 +406,15 @@ ierr = check_nml_error(io_status,'ocean_lap_tracer_nml')
          id_h_diffuse(n) = register_diag_field ('ocean_model',                            &
          trim(T_prog(n)%name)//'_h_diffuse', Grd%tracer_axes(1:3),                        &
               Time%model_time, 'horz-diffusion of '//trim(T_prog(n)%name), 'kg/(sec*m^2)',&
+              missing_value=missing_value, range=(/-1.e10,1.e10/)) 
+	 id_lap_tracer_th_tendency(n) = register_diag_field ('ocean_model',                            &
+         trim(T_prog(n)%name)//'_lap_tracer_th_tendency', Grd%tracer_axes(1:3),                        &
+              Time%model_time, 'layer integral tendency of '//trim(T_prog(n)%name)//' by lap_tracer', 'kg/(sec*m^2)',&
               missing_value=missing_value, range=(/-1.e10,1.e10/))         
      endif
 
   enddo
-
-  
+    
 end subroutine ocean_lap_tracer_init
 ! </SUBROUTINE>  NAME="ocean_lap_tracer_init"
 
@@ -373,7 +427,7 @@ end subroutine ocean_lap_tracer_init
 ! time tendency for tracer from lateral laplacian diffusion. 
 ! </DESCRIPTION>
 !
-subroutine lap_tracer (Time, Thickness, Tracer, ntracer, diag_flag)
+subroutine lap_tracer (Time, Thickness, Tracer, ntracer, Waves, surf_blthick, diag_flag)
 
   type(ocean_time_type),        intent(in)    :: Time
   type(ocean_thickness_type),   intent(in)    :: Thickness
@@ -381,11 +435,13 @@ subroutine lap_tracer (Time, Thickness, Tracer, ntracer, diag_flag)
   integer,                      intent(in)    :: ntracer
   logical,            optional, intent(in)    :: diag_flag 
   logical                                     :: send_diagnostics 
-
+  type(ocean_wave_type),        intent(in)    :: Waves
+  real, dimension(isd:,jsd:),   intent(in)    :: surf_blthick
+  
   real, dimension(isd:ied,jsd:jed,2)  :: tracr
   integer                             :: i, j, k
-  integer                             :: tau, taum1
- 
+  integer                             :: tau, taum1 
+
   if(.not. use_this_module) return 
 
   ! assume send_diagnostics=.true., unless diag_flag says it is false.
@@ -404,32 +460,90 @@ subroutine lap_tracer (Time, Thickness, Tracer, ntracer, diag_flag)
 
   ! fx = flux component through "eastern"  face of T-cells at level k
   ! fy = flux component through "northern" face of T-cells at level k
+  
+  if(use_stokes_diffusion) then
+     if (ntracer .eq. 1) then  ! calculate stokes drift velocity only once
+  
+        do k=1,min(nk,stokes_diffusion_max_k)
+           ! calculate z-dependent stokes drift velocity [m/s]
+           do j=jsd,jed
+              do i=isd,ied
+	         stokesdiffusion_nt(i,j,k) = Waves%stokes(i,j) &
+	                                     * exp(-2.0*Thickness%depth_zt(i,j,k)*Waves%wave_k(i,j))
+              enddo
+	   enddo    
+           ! use this velocity as a diffusion velocity and convert it to a diffusivity, analog to diff_cet and diff_cnt
+	   do j=jsd,jed
+              do i=isd,ied
+                 stokesdiffusion_et(i,j,k) = stokesdiffusion_nt(i,j,k)*diff_cet(i,j,k)/vel_micom
+                 stokesdiffusion_nt(i,j,k) = stokesdiffusion_nt(i,j,k)*diff_cnt(i,j,k)/vel_micom
+		 if (limit_stokes_diffusion_hblt .and. (Thickness%depth_zt(i,j,k) > limit_stokes_diffusion_hblt_factor*surf_blthick(i,j))) then
+		    stokesdiffusion_et(i,j,k) = 0.0
+		    stokesdiffusion_et(max(i-1,isd),j,k) = 0.0
+		    stokesdiffusion_nt(i,j,k) = 0.0
+		    stokesdiffusion_nt(i,max(j-1,jsd),k) = 0.0
+		 endif
+		 if (i .lt. stokes_diffusion_min_i) then
+		    stokesdiffusion_et(i,j,k) = 0.0
+		    stokesdiffusion_nt(i,j,k) = 0.0
+		 endif
+	      enddo
+	   enddo
+        enddo    
+     endif
+     if(horz_z_diffuse) then 
 
-  if(horz_z_diffuse) then 
+    	! tracr(:,:,1) = Tracer%field at level k-1
+    	! tracr(:,:,2) = Tracer%field at level k
 
-      ! tracr(:,:,1) = Tracer%field at level k-1
-      ! tracr(:,:,2) = Tracer%field at level k
+    	tracr(:,:,1) = Tracer%field(:,:,1,taum1)
+    	do k=1,nk
+    	   tracr(:,:,2) = Tracer%field(:,:,k,taum1)
+    	   fx(:,:,k)	= (diff_cet(:,:,k)+stokesdiffusion_et(:,:,k)) &
+  	  		  *FDX_ZT(tracr(:,:,1:2),k)*FMX(Thickness%rho_dzt(:,:,k,tau)*Grd%tmask(:,:,k))
+    	   fy(:,:,k)	= (diff_cnt(:,:,k)+stokesdiffusion_nt(:,:,k)) &
+  	  		  *FDY_ZT(tracr(:,:,1:2),k)*FMY(Thickness%rho_dzt(:,:,k,tau)*Grd%tmask(:,:,k))
+    	   tracr(:,:,1) = tracr(:,:,2)
+    	enddo
 
-      tracr(:,:,1) = Tracer%field(:,:,1,taum1)
-      do k=1,nk
-         tracr(:,:,2) = Tracer%field(:,:,k,taum1)
-         fx(:,:,k)    = diff_cet(:,:,k)*FDX_ZT(tracr(:,:,1:2),k)*FMX(Thickness%rho_dzt(:,:,k,tau)*Grd%tmask(:,:,k))
-         fy(:,:,k)    = diff_cnt(:,:,k)*FDY_ZT(tracr(:,:,1:2),k)*FMY(Thickness%rho_dzt(:,:,k,tau)*Grd%tmask(:,:,k))
-         tracr(:,:,1) = tracr(:,:,2)
-      enddo
+     elseif(horz_s_diffuse) then 
+  
+  	do k=1,nk
+  	   tracr(:,:,1) = Tracer%field(:,:,k,taum1)
+  	   fx(:,:,k)	= (diff_cet(:,:,k)+stokesdiffusion_et(:,:,k)) &
+  			  *FDX_T(tracr(:,:,1))*FMX(Thickness%rho_dzt(:,:,k,tau)*Grd%tmask(:,:,k))
+  	   fy(:,:,k)	= (diff_cnt(:,:,k)+stokesdiffusion_nt(:,:,k)) & 
+  			  *FDY_T(tracr(:,:,1))*FMY(Thickness%rho_dzt(:,:,k,tau)*Grd%tmask(:,:,k))
+  	enddo
+  
+     endif
+  else ! no Stokes drift induced diffusion
+     if(horz_z_diffuse) then 
+    
+  	  ! tracr(:,:,1) = Tracer%field at level k-1
+  	  ! tracr(:,:,2) = Tracer%field at level k
+    
+  	tracr(:,:,1) = Tracer%field(:,:,1,taum1)
+  	do k=1,nk
+  	   tracr(:,:,2) = Tracer%field(:,:,k,taum1)
+  	   fx(:,:,k)	= diff_cet(:,:,k)*FDX_ZT(tracr(:,:,1:2),k)*FMX(Thickness%rho_dzt(:,:,k,tau)*Grd%tmask(:,:,k))
+  	   fy(:,:,k)	= diff_cnt(:,:,k)*FDY_ZT(tracr(:,:,1:2),k)*FMY(Thickness%rho_dzt(:,:,k,tau)*Grd%tmask(:,:,k))
+  	   tracr(:,:,1) = tracr(:,:,2)
+  	enddo
 
-  elseif(horz_s_diffuse) then 
+     elseif(horz_s_diffuse) then 
 
-      do k=1,nk
-         tracr(:,:,1) = Tracer%field(:,:,k,taum1)
-         fx(:,:,k)    = diff_cet(:,:,k)*FDX_T(tracr(:,:,1))*FMX(Thickness%rho_dzt(:,:,k,tau)*Grd%tmask(:,:,k))
-         fy(:,:,k)    = diff_cnt(:,:,k)*FDY_T(tracr(:,:,1))*FMY(Thickness%rho_dzt(:,:,k,tau)*Grd%tmask(:,:,k))
-      enddo
-
+        do k=1,nk
+      	   tracr(:,:,1) = Tracer%field(:,:,k,taum1)
+           fx(:,:,k)	= diff_cet(:,:,k)*FDX_T(tracr(:,:,1))*FMX(Thickness%rho_dzt(:,:,k,tau)*Grd%tmask(:,:,k))
+      	   fy(:,:,k)	= diff_cnt(:,:,k)*FDY_T(tracr(:,:,1))*FMY(Thickness%rho_dzt(:,:,k,tau)*Grd%tmask(:,:,k))
+        enddo
+        
+     endif
   endif
-
+        
   if(Grd%tripolar) call mpp_update_domains(fx, fy, Dom_flux%domain2d, gridtype=CGRID_NE)
-
+        
   do k=1,nk
      wrk1(:,:,k) = (BDX_ET(fx(:,:,k)) + BDY_NT(fy(:,:,k)))
      do j=jsc,jec
@@ -456,9 +570,12 @@ subroutine lap_tracer (Time, Thickness, Tracer, ntracer, diag_flag)
           call diagnose_3d(Time, Grd, id_yflux_diff(ntracer), -1.0*fy(:,:,:)*Tracer%conversion)
       endif
       if (id_h_diffuse(ntracer) > 0) then
-         call diagnose_3d(Time, Grd, id_h_diffuse(ntracer), wrk1(:,:,:)*Tracer%conversion)
+          call diagnose_3d(Time, Grd, id_h_diffuse(ntracer), wrk1(:,:,:)*Tracer%conversion)
       endif
-
+      if (id_lap_tracer_th_tendency(ntracer) > 0) then
+          call diagnose_3d(Time, Grd, id_lap_tracer_th_tendency(ntracer), & 
+                           Tracer%th_tendency(isc:iec,jsc:jec,:)*Tracer%conversion)
+      endif
   endif
 
   if (have_obc) then 

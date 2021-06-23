@@ -145,6 +145,18 @@ module ocean_shortwave_gfdl_mod
 !  has a uniform distribution.  
 !  Default optics_for_uniform_chl=.false.
 !  </DATA> 
+!  <DATA NAME="use_sun_angle" TYPE="logical">
+!  Use the sun angle to calculate shortwave radiation penetration
+!  Default use_sun_angle=.false.
+!  </DATA> 
+!  <DATA NAME="use_sun_angle_par" TYPE="logical">
+!  Use the sun angle to calculate photosynthetically active radiation profile
+!  Default use_sun_angle_par=.false.
+!  </DATA> 
+!  <DATA NAME="par_opacity_from_bio" TYPE="logical">
+!  Use opacity parameters from ecosystem model for photosynthetically active radiation
+!  Default par_opacity_from_bio=.false.
+!  </DATA> 
 
 !  <DATA NAME="debug_this_module" TYPE="logical">
 !  For debugging purposes.
@@ -188,6 +200,8 @@ integer :: id_sw_morel
 integer :: id_sw_morel_mom4p0
 
 integer :: index_chl
+integer :: index_opacity_bio 
+integer :: index_opacity_water 
 integer :: sbc_chl
 logical :: verbose_flag=.false.
 
@@ -214,7 +228,7 @@ real, dimension(6) :: Z2_coef
 type(ocean_domain_type), pointer :: Dom => NULL()
 type(ocean_grid_type),   pointer :: Grd => NULL()
 
-character(len=128)  :: version='$Id: ocean_shortwave_gfdl.F90,v 20.0 2013/12/14 00:16:18 fms Exp $'
+character(len=128)  :: version='$Id: ocean_shortwave_gfdl.F90,v 20.0 2013/12/14 00:16:18 fms Exp IOW$'
 character (len=128) :: tagname = '$Name: tikal $'
 character(len=48), parameter          :: mod_name = 'ocean_shortwave_gfdl_mod'
 
@@ -234,6 +248,11 @@ logical :: enforce_sw_frac        = .true.
 logical :: override_f_vis         = .true. 
 logical :: sw_morel_fixed_depths  = .false. 
 logical :: optics_for_uniform_chl = .false. 
+logical :: use_sun_angle          = .false.  ! use sun angle for calculation of shortwave heating
+logical :: use_sun_angle_par      = .false.  ! use sun angle for opacity calculation for 
+                                             !   photosynthetically active radiation
+logical :: par_opacity_from_bio   = .false.  ! use opacity of biological tracers for 
+                                             !   photosynthetically active radiation
 
 
 ! (mg/m^3) default concentration 0.08 roughly yields Jerlov Type 1A optics
@@ -250,7 +269,9 @@ namelist /ocean_shortwave_gfdl_nml/ use_this_module, read_chl, chl_default,     
                                     zmax_pen, sw_frac_top, debug_this_module,     &
                                     enforce_sw_frac, override_f_vis,              &
                                     sw_morel_fixed_depths, optics_for_uniform_chl,&
-                                    optics_morel_antoine, optics_manizza  
+                                    optics_morel_antoine, optics_manizza,         &
+				    use_sun_angle, use_sun_angle_par,             &
+			            par_opacity_from_bio
 
 contains
 
@@ -267,6 +288,14 @@ contains
     type(ocean_time_type),     intent(in)         :: Time
     integer,                   intent(in)         :: ver_coordinate
     type(ocean_options_type),  intent(inout)      :: Ocean_options
+
+    character(len=48),  parameter :: sub_name = 'ocean_shortwave_gfdl_init'
+    character(len=256), parameter :: error_header = '==>Error from ' // trim(mod_name) //   &
+                                                    '(' // trim(sub_name) // '): '
+    character(len=256), parameter :: warn_header = '==>Warning from ' // trim(mod_name) //  &
+                                                   '(' // trim(sub_name) // '): '
+    character(len=256), parameter :: note_header = '==>Note from ' // trim(mod_name) //     &
+                                                   '(' // trim(sub_name) // '): '
 
     integer :: unit, io_status, ierr, i, j
 #ifdef MOM_STATIC_ARRAYS    
@@ -381,6 +410,22 @@ contains
     sat_chl(:,:)   = chl_default*Grd%tmask(:,:,1)
 
     index_chl = fm_get_index('/ocean_mod/diag_tracers/chl')
+
+    if (par_opacity_from_bio) then    
+       index_opacity_bio   = fm_get_index('/ocean_mod/diag_tracers/opacity_bio')
+       index_opacity_water = fm_get_index('/ocean_mod/diag_tracers/opacity_water')
+    
+       if (index_opacity_bio .le. 0) then
+          call mpp_error(FATAL, &
+             '==>Error: par_opacity_from_bio in ocean_shortwave_gfdl is set to .true., ' &
+             //'but diagnostic tracer opacity_bio is not defined.')
+       endif
+       if (index_opacity_water .le. 0) then
+          call mpp_error(FATAL, &
+             '==>Error: par_opacity_from_bio in ocean_shortwave_gfdl is set to .true., ' & 
+             //'but diagnostic tracer opacity_water is not defined.')
+       endif
+    endif
     
     ! for reading chlorophyll climatology data  
     if(read_chl) then 
@@ -531,7 +576,7 @@ end subroutine ocean_shortwave_gfdl_init
 ! sw_morel_fixed_depths=.true. 
 !
 ! </DESCRIPTION>
-subroutine sw_source_gfdl(Time, Thickness, T_diag, swflx, swflx_vis, index_irr, Temp, sw_frac_zt, opacity)
+subroutine sw_source_gfdl(Time, Thickness, T_diag, swflx, swflx_vis, index_irr, Temp, sw_frac_zt, opacity, coszen)
 
   type(ocean_time_type),          intent(in)    :: Time
   type(ocean_thickness_type),     intent(in)    :: Thickness
@@ -542,13 +587,14 @@ subroutine sw_source_gfdl(Time, Thickness, T_diag, swflx, swflx_vis, index_irr, 
   type(ocean_prog_tracer_type),   intent(inout) :: Temp
   real, dimension(isd:,jsd:,:),   intent(inout) :: sw_frac_zt
   real, dimension(isd:,jsd:,:),   intent(inout) :: opacity
+  real, dimension(isd:,jsd:),     intent(in)    :: coszen   
 
   real, dimension(isd:ied,jsd:jed)  :: f_vis
   real, dimension(isd:ied,jsd:jed)  :: zt_sw
   real, dimension(isd:ied,jsd:jed)  :: zw_sw
   real, dimension(isd:ied,jsd:jed)  :: chl_data
 
-  real    :: div_sw 
+  real    :: div_sw, sinzen_w
   integer :: i, j, k
   integer :: tau
 
@@ -688,9 +734,9 @@ subroutine sw_source_gfdl(Time, Thickness, T_diag, swflx, swflx_vis, index_irr, 
              if(sw_morel_fixed_depths) then 
                  if(Grd%zw(k) <= zmax_pen) then 
                      zw_sw(isc:iec,jsc:jec) = Grd%zw(k)
-                     call sw_morel(T_diag, zw_sw, f_vis, sw_fk_zw, k)
+                     call sw_morel(T_diag, zw_sw, f_vis, sw_fk_zw, k, coszen)
                      zt_sw(isc:iec,jsc:jec) = Grd%zt(k)
-                     call sw_morel(T_diag, zt_sw, f_vis, sw_fk_zt, k)
+                     call sw_morel(T_diag, zt_sw, f_vis, sw_fk_zt, k, coszen)
                  else
                      sw_fk_zt(:,:) = 0.0
                      sw_fk_zw(:,:) = 0.0
@@ -702,8 +748,8 @@ subroutine sw_source_gfdl(Time, Thickness, T_diag, swflx, swflx_vis, index_irr, 
                        zt_sw(i,j) = wrk3(i,j,k)
                     enddo
                  enddo
-                 call sw_morel(T_diag, zw_sw, f_vis, sw_fk_zw, k)
-                 call sw_morel(T_diag, zt_sw, f_vis, sw_fk_zt, k)  
+                 call sw_morel(T_diag, zw_sw, f_vis, sw_fk_zw, k, coszen)
+                 call sw_morel(T_diag, zt_sw, f_vis, sw_fk_zt, k, coszen)  
              endif
              sw_frac_zt(:,:,k) = sw_fk_zt(:,:)
              sw_frac_zw(:,:,k) = sw_fk_zw(:,:)
@@ -852,22 +898,73 @@ subroutine sw_source_gfdl(Time, Thickness, T_diag, swflx, swflx_vis, index_irr, 
   ! of sw_frac_zw(k=0)=0.0 to compute opacity would result in a
   ! negative opacity at k=1, which is not physical. Instead, for 
   ! purposes of opacity calculation, we need sw_frac_zw(k=0)=1.0. 
-  k=1
-  do j=jsc,jec
-     do i=isc,iec           
-        opacity(i,j,k) = -log( sw_frac_zw(i,j,k)/(f_vis(i,j)+epsln) + epsln) &
-                          /(Thickness%dzt(i,j,k) + epsln)
-     enddo
-  enddo
-  do k=2,nk-1
-     do j=jsc,jec
-        do i=isc,iec           
-           opacity(i,j,k) = -log( sw_frac_zw(i,j,k)/(sw_frac_zw(i,j,k-1)+epsln) + epsln) &
-                             /(Thickness%dzt(i,j,k) + epsln)
+  if (par_opacity_from_bio) then
+     if (use_sun_angle_par) then
+        do j=jsc,jec
+           do i=isc,iec      
+              ! use wrk2 array to store inverse cosine of underwater zenith angle
+	      ! sin beta = sin alpha / 1.33
+	      sinzen_w    = sqrt(1-coszen(i,j)**2)/1.33            ! cos alpha => sin beta
+  	      wrk2(i,j,1) = 1/(sqrt(1-sinzen_w**2)+epsln)          ! sin beta  => 1/cos beta
+           enddo
         enddo
-     enddo
-  enddo
-
+	do k=1,nk-1
+           do j=jsc,jec
+              do i=isc,iec
+                 opacity(i,j,k) = (T_diag(index_opacity_water)%field(i,j,k) &
+	                          +T_diag(index_opacity_bio  )%field(i,j,k))*wrk2(i,j,1)
+              enddo
+           enddo
+        enddo
+     else
+        do k=1,nk-1
+           do j=jsc,jec
+              do i=isc,iec
+                 opacity(i,j,k) = (T_diag(index_opacity_water)%field(i,j,k) &
+	                          +T_diag(index_opacity_bio  )%field(i,j,k))
+              enddo
+           enddo
+        enddo
+     endif
+  else
+     if (use_sun_angle_par) then
+        k=1
+        do j=jsc,jec
+           do i=isc,iec      
+              ! use wrk2 array to store inverse cosine of underwater zenith angle
+	      ! sin beta = sin alpha / 1.33
+	      sinzen_w    = sqrt(1-coszen(i,j)**2)/1.33            ! cos alpha => sin beta
+  	      wrk2(i,j,1) = 1/(sqrt(1-sinzen_w**2)+epsln)          ! sin beta  => 1/cos beta
+	      opacity(i,j,k) = -log( sw_frac_zw(i,j,k)/(f_vis(i,j)+epsln) + epsln) &
+                               /(Thickness%dzt(i,j,k) + epsln)*wrk2(i,j,1)
+           enddo
+        enddo
+        do k=2,nk-1
+           do j=jsc,jec
+              do i=isc,iec           
+                 opacity(i,j,k) = -log( sw_frac_zw(i,j,k)/(sw_frac_zw(i,j,k-1)+epsln) + epsln) &
+                                  /(Thickness%dzt(i,j,k) + epsln)*wrk2(i,j,1)
+              enddo
+           enddo
+        enddo
+     else
+        k=1
+        do j=jsc,jec
+           do i=isc,iec           
+              opacity(i,j,k) = -log( sw_frac_zw(i,j,k)/(f_vis(i,j)+epsln) + epsln) &
+                               /(Thickness%dzt(i,j,k) + epsln)
+           enddo
+        enddo
+        do k=2,nk-1
+           do j=jsc,jec
+              do i=isc,iec           
+                 opacity(i,j,k) = -log( sw_frac_zw(i,j,k)/(sw_frac_zw(i,j,k-1)+epsln) + epsln) &
+                                  /(Thickness%dzt(i,j,k) + epsln)
+              enddo
+           enddo
+        enddo
+     endif
+  endif
 
 end subroutine sw_source_gfdl
 ! </SUBROUTINE> NAME="sw_source_gfdl"
@@ -884,18 +981,19 @@ end subroutine sw_source_gfdl
 !  between three exponentials:
 !
 !  The first exponential is for wavelength > 0.75 um (microns) and assumes a
-!  single attenuation of 0.267 m if the "zenith_angle" is 0.  Presently the 
-!  code assumes a zero zenith angle, but this could be modified easily. 
+!  single attenuation of 0.267 m if the  solar zenith angle is 0.  
+!  The zenith angle (taken from the ice model) may be taken into account by turning on 
+!  the namelist option "use_sun_angle".
 !
 !  The second and third exponentials represent a parameterization of the
-!  attenuation coeficient for light between 300 um and 750 um in the following
+!  attenuation coeficient for light between 300 nm and 750 nm in the following
 !  form:
 !
 !	E(z) = E(0) * [V1 *  exp(z/efold1) + V2 * exp(z/efold2)]
 !       with z < 0 the ocean depth 
 !
 !  Here, V1+V2=1 represent the partitioning between long (V1) and short (V2)
-!  wavelengths between 300 um and 750 um. Thoughout most of the ocean V1<0.5
+!  wavelengths between 300 nm and 750 nm. Thoughout most of the ocean V1<0.5
 !  and V2>0.5. The "efold1" and "efold2" are the efolding depth of the long and short
 !  visable and ultra violet light. Throughout most of the ocean efold1 should not exceed 3 m
 !  while the efold2 will vary between 30 m in oligotrophic waters and 4 m in coastal
@@ -930,20 +1028,21 @@ end subroutine sw_source_gfdl
 !
 ! </INFO>
 !
-subroutine sw_morel (T_diag, z_sw, f_vis, sw_fk, ksw)
+subroutine sw_morel (T_diag, z_sw, f_vis, sw_fk, ksw, coszen)
 
   type(ocean_diag_tracer_type), dimension(:), intent(in)    :: T_diag
   real, dimension(isd:,jsd:),                 intent(in)    :: z_sw     ! vertical depth
   real, dimension(isd:,jsd:),                 intent(in)    :: f_vis    ! fraction of incoming sw that is visible
   real, dimension(isd:,jsd:),                 intent(inout) :: sw_fk    ! sw fractional decay
   integer,                                    intent(in)    :: ksw      ! index of the k-level 
-
+  real, dimension(isd:,jsd:),                 intent(in)    :: coszen   ! cosine of the solar zenith angle above the sea surface
+  
   ! parameters for optical model using C=log10(chl)
   real    :: V1, V2, efold1, efold2 
   real    :: C, C2, C3, C4, C5
-  real    :: zenith_angle
   real    :: swmax, swmin, chmax, chmin
-
+  real    :: sinzen_w, coszen_w                          ! sine and cosine of the solar zenith angle in the water
+                                                         ! that is, after refraction at the sea surface
   integer :: i, j, kswp1
 
   integer :: stdoutunit 
@@ -956,7 +1055,6 @@ subroutine sw_morel (T_diag, z_sw, f_vis, sw_fk, ksw)
     '==>Error in ocean_shortwave_gfdl_mod (sw_morel): module must be initialized')
   endif 
 
-  zenith_angle = 0.0
   kswp1 = min(ksw+1,nk)
 
   ! compute shortwave fraction based on triple exponential 
@@ -994,7 +1092,14 @@ subroutine sw_morel (T_diag, z_sw, f_vis, sw_fk, ksw)
             efold2 = Z2_coef(1) + Z2_coef(2) * C + Z2_coef(3) * C**2  &
                  + Z2_coef(4) * C3 + Z2_coef(5) * C4 + Z2_coef(6) * C5
 
-            sw_fk(i,j) = (1-f_vis(i,j)) * exp( -z_sw(i,j)/(0.267 * cos(zenith_angle)) )   &
+            if (use_sun_angle) then
+  	       sinzen_w=sqrt(1-coszen(i,j)**2)/1.33        ! refraction of light at sea surface
+	                                                   ! sin beta = sin alpha / 1.33
+               coszen_w=sqrt(1-sinzen_w**2)					                 
+	    else
+	       coszen_w=1
+	    endif
+            sw_fk(i,j) = (1-f_vis(i,j)) * exp( -z_sw(i,j)/(0.267 * coszen_w) )   &
                  + f_vis(i,j)  * ( V1 * exp( -z_sw(i,j)/efold1 )                 &
                  + V2 * exp( -z_sw(i,j)/efold2 ) )
 

@@ -6,6 +6,13 @@ module ocean_vert_kpp_mom4p1_mod
 !<CONTACT EMAIL="martin.schmidt@io-warnemuende.de"> Martin Schmidt 
 !</CONTACT>
 !
+!<CONTACT EMAIL="hagen.radtke@io-warnemuende.de"> Hagen Radtke
+!</CONTACT>
+!
+! for changes in subroutine ri_for_kpp & Stigebrandt scheme
+!<CONTACT EMAIL="torsten.seifert@io-warnemuende.de"> Torsten Seifert
+!</CONTACT>
+!
 !<REVIEWER EMAIL="wily@ucar.edu"> Bill Large 
 !</REVIEWER>
 !
@@ -51,6 +58,10 @@ module ocean_vert_kpp_mom4p1_mod
 ! Danabasoglu etal (2006) 
 ! Diurnal coupling in the tropical oceans of CCSM3
 ! Journal of Climate (2006) vol 19 pages 2347--2365
+! </REFERENCE>
+! <REFERENCE>
+! Smyth et al., 2002: Nonlocal fluxes and Stokes drift effects in 
+! the K-profile parameterization, Ocean Dynamics 52, 3, 104-115
 ! </REFERENCE>
 !
 ! <NOTE>
@@ -241,6 +252,27 @@ module ocean_vert_kpp_mom4p1_mod
 !  compatibility, we default to smooth_ri_kmax_eq_kmu=.false. 
 !  </DATA> 
 !
+!  <DATA NAME="use_smyth_langmuir" TYPE="logical">
+!  Use the stokes drift coming from the wave model to include the 
+!  effect of Langmuir circulation according to Smyth et al., 2002
+!  Default=.false.
+!  </DATA> 
+!
+!  <DATA NAME="enhance_stokesdrift" TYPE="logical">
+!  Factor by which stokes drift is multiplied, default=1.0
+!  </DATA>
+!
+!  <DATA NAME="co_stigebrandt" TYPE="logical">
+!  Constant of internal wave background mixing scheme after Stigebrand (1987), 
+!  A model of the vertical circulation of the Baltic Sea deep water,
+!  J. Phys. Oceanogr. 17, 1772-1785.
+!  Parameterization for Baltic Sea adopted from Meier (2001),
+!  On the parameterization of mixing in three-dimensional Baltic Sea models,
+!  J. Geophys. Res. 106, C12, 30997-31016.
+!  default co_stigebrandt=1.0e-7 m**2/s**2, cx_stigebrandt=1.0e-4 m**2/s
+!  activated by do_stigebrandt=.true.
+!  </DATA>
+
 !</NAMELIST>
 
 use constants_mod,    only: epsln
@@ -259,6 +291,7 @@ use ocean_types_mod,       only: ocean_grid_type, ocean_domain_type
 use ocean_types_mod,       only: ocean_prog_tracer_type, ocean_diag_tracer_type
 use ocean_types_mod,       only: ocean_velocity_type, ocean_density_type
 use ocean_types_mod,       only: ocean_time_type, ocean_time_steps_type, ocean_thickness_type
+use wave_types_mod,        only: ocean_wave_type
 use ocean_workspace_mod,   only: wrk1, wrk2, wrk3, wrk4, wrk5
 use ocean_util_mod,        only: diagnose_2d, diagnose_3d, diagnose_sum
 use ocean_tracer_util_mod, only: diagnose_3d_rho
@@ -307,6 +340,7 @@ real, dimension(isd:ied,jsd:jed,nk)             :: dVsq       ! (velocity shear 
 real, dimension(isd:ied,jsd:jed,3)              :: Rib        ! Bulk Richardson number
 real, dimension(isd:ied,jsd:jed,3)              :: gat1
 real, dimension(isd:ied,jsd:jed,3)              :: dat1
+real, dimension(isd:ied,jsd:jed)                :: langmuir   ! Langmuir number=sqrt(ustar/ustokes) (1)
 
 type wsfc_type
   real, dimension(isd:ied,jsd:jed)              :: wsfc        ! rho0r*(stf - pme*(t(i,j,k=1)-tpme) - river*(t(i,j,k=1)-triver))
@@ -314,6 +348,7 @@ end type wsfc_type
 real, dimension(isd:ied,jsd:jed)                :: sw_frac_hbl ! fractional shortwave penetration at base of mixed layer
 integer, dimension(isd:ied,jsd:jed)             :: kbl         ! index of first grid level below hbl
 
+real, private, dimension(isd:ied,jsd:jed,nk)    :: bvf         ! buoyancy frequency at base of T-cells
 real, private, dimension(isd:ied,jsd:jed,nk)    :: riu         ! Richardson number at base of U-cells
 real, private, dimension(isd:ied,jsd:jed,nk)    :: rit         ! Richardson number at base of T-cells
 real, private, dimension(isd:ied,jsd:jed,nk)    :: ghats       ! nonlocal transport (s/m^2)
@@ -345,6 +380,7 @@ real, dimension(:,:,:), allocatable    :: dVsq     ! (velocity shear re sfc)^2  
 real, dimension(:,:,:), allocatable    :: Rib      ! Bulk Richardson number
 real, dimension(:,:,:), allocatable    :: gat1
 real, dimension(:,:,:), allocatable    :: dat1
+real, dimension(:,:), allocatable      :: langmuir ! Langmuir number=sqrt(ustar/ustokes) (1)
 
 type wsfc_type
   real, dimension(:,:), pointer        :: wsfc => NULL()  ! rho0r*(stf - pme*(t(i,j,k=1)-tpme) - river*(t(i,j,k=1)-triver))
@@ -352,6 +388,7 @@ end type wsfc_type
 real, dimension(:,:), allocatable      :: sw_frac_hbl     ! fractional shortwave penetration at base of mixed layer
 integer, dimension(:,:), allocatable   :: kbl             ! index of first grid level below hbl
 
+real, private, dimension(:,:,:), allocatable :: bvf         ! buoyancy frequency at base of T-cells
 real, private, dimension(:,:,:), allocatable :: riu         ! Richardson number at base of U-cells
 real, private, dimension(:,:,:), allocatable :: rit         ! Richardson number at base of T-cells
 real, private, dimension(:,:,:), allocatable :: ghats       ! nonlocal transport (s/m^2)
@@ -374,10 +411,15 @@ real :: diff_cbt_limit     = 50.0e-4 ! max diff due to shear instability
 real :: visc_con_limit     = 0.1     ! m^2/s. visc due to convective instability
 real :: diff_con_limit     = 0.1     ! m^2/s. diff due to convective instability
 real :: visc_cbu_iw        = 1.0e-4  ! m^2/s. visc background due to internal waves
-real :: diff_cbt_iw        = 0.1e-4  ! m^2/s. diffusivity background due to internal waves
+real :: diff_cbt_iw        = 0.1e-4  ! m^2/s. diff background due to internal waves
 real :: Vtc                          ! non-dimensional coefficient for velocity 
                                      ! scale of turbulant velocity shear        
                                      ! (=function of concv,concs,epsilon,von_karman,Ricr)
+real :: smyth_cw0          = 0.15    ! C_w0 value needed for use_smyth_langmuir
+real :: smyth_l            = 2.0     ! l value needed for use_smyth_langmuir
+real :: co_stigebrandt     = 1.0e-7  ! m^2/s^2. Stigebrandt constant for background mixing due to internal waves
+real :: cx_stigebrandt     = 1.0e-4  ! m^2/s. Stigebrandt maximum background mixing due to internal waves
+real :: cp_stigebrandt     = 10      ! Prandtl number for Stigebrandt scheme
 
 real :: cg              ! non-dimensional coefficient for counter-gradient term
 real :: deltaz          ! delta zehat in table
@@ -423,6 +465,8 @@ logical :: linear_hbl        = .true.    ! To use the linear interpolation as La
                                          ! Set to .false. for quadratic interpolation as in Danabasoglu et al.
 logical :: calc_visc_on_cgrid=.false.    ! calculate viscosity directly on c-grid
 logical :: smooth_ri_kmax_eq_kmu=.false. ! to set details for smoothing the richardson number
+logical :: use_smyth_langmuir=.false.    ! include Langmuir circulation parameterization after Smyth et al.
+real    :: enhance_stokesdrift = 1.0     ! factor multiplied with the stokes drift
 real    :: shear_instability_flag    = 1.0     ! set to 1.0 if shear_instability=.true.
 
 
@@ -439,6 +483,9 @@ logical  :: used
 integer  :: id_diff_cbt_kpp_t =-1
 integer  :: id_diff_cbt_kpp_s =-1
 integer  :: id_hblt           =-1
+integer  :: id_bvf_kpp        =-1
+integer  :: id_rit_kpp        =-1
+integer  :: id_riu_kpp        =-1
 integer  :: id_ws             =-1
 
 integer  :: id_neut_rho_kpp_nloc          =-1
@@ -469,6 +516,7 @@ integer  :: id_tform_salt_kpp_nloc_on_nrho =-1
 logical :: non_local_kpp = .true.  ! enable/disable non-local term in KPP
 logical :: smooth_blmc   = .false. ! smooth boundary layer diffusitivies to remove grid scale noise
 logical :: do_langmuir   = .false. ! whether or not calcualte langmuir turbulence enhance factor
+logical :: do_stigebrandt = .false. ! use Stigenbrandt's const/buoy.freq. for internal wave mixing
 
 integer, parameter :: nni = 890         ! number of values for zehat in the look up table
 integer, parameter :: nnj = 480         ! number of values for ustar in the look up table
@@ -485,7 +533,7 @@ integer :: num_diag_tracers=0, index_frazil
 integer :: kbl_max=2                    ! helps to limit vertikal loops 
 
 character(len=256) :: version=&
-     '$Id: ocean_vert_kpp_mom4p1.F90,v 20.0 2013/12/14 00:16:44 fms Exp $'
+     '$Id: ocean_vert_kpp_mom4p1.F90,v 20.0 2013/12/14 00:16:44 fms Exp IOW$'
 character (len=128) :: tagname = &
      '$Name: tikal $'
 
@@ -502,9 +550,11 @@ namelist /ocean_vert_kpp_mom4p1_nml/ use_this_module, shear_instability, double_
                                      limit_with_hekman, limit_ghats, hbl_with_rit,          &
                                      radiation_large, radiation_zero, radiation_iow,        &
                                      use_sbl_bottom_flux, wsfc_combine_runoff_calve,        &
-			             bvf_from_below, variable_vtc, use_max_shear,           &
-			             linear_hbl, calc_visc_on_cgrid, smooth_ri_kmax_eq_kmu, &
-                                     do_langmuir
+                                     bvf_from_below, variable_vtc, use_max_shear,           &
+                                     linear_hbl, calc_visc_on_cgrid, smooth_ri_kmax_eq_kmu, &
+                                     use_smyth_langmuir, enhance_stokesdrift, smyth_cw0,    &
+                                     smyth_l, do_langmuir, do_stigebrandt, co_stigebrandt,   &
+                                     cx_stigebrandt, cp_stigebrandt
                                  
 
 contains
@@ -725,6 +775,7 @@ ierr = check_nml_error(io_status,'ocean_vert_kpp_mom4p1_nml')
   endif
 
   allocate (ghats(isd:ied,jsd:jed,nk))
+  allocate (bvf(isd:ied,jsd:jed,nk))
   allocate (riu(isd:ied,jsd:jed,nk))
   allocate (rit(isd:ied,jsd:jed,nk))
   allocate (hblt(isd:ied,jsd:jed))
@@ -758,11 +809,15 @@ ierr = check_nml_error(io_status,'ocean_vert_kpp_mom4p1_nml')
   allocate (gat1(isd:ied,jsd:jed,3))
   allocate (dat1(isd:ied,jsd:jed,3))
   allocate(sw_frac_hbl(isd:ied,jsd:jed))
+  if (use_smyth_langmuir) then
+    allocate(langmuir(isd:ied,jsd:jed))     ! Langmuir number = sqrt(ustar/ustokes) (1)
+  endif
 
 #endif
 
   kbl(:,:)         = 0
   ghats(:,:,:)     = 0.0
+  bvf(:,:,:)       = 0.0
   riu(:,:,:)       = 0.0
   rit(:,:,:)       = 0.0
   hblt(:,:)        = 0.0
@@ -897,6 +952,21 @@ ierr = check_nml_error(io_status,'ocean_vert_kpp_mom4p1_nml')
        missing_value = missing_value, range=(/-1.e5,1.e6/),                &
        standard_name='ocean_mixed_layer_thickness_defined_by_mixing_scheme')
 
+  id_bvf_kpp = register_diag_field('ocean_model','bvf_kpp',Grd%tracer_axes(1:3), &
+       Time%model_time, 'T-cell buoy.freq. from KPP', '1/s',                 &
+       missing_value = missing_value, range=(/-1.e20,1.e20/),                &
+       standard_name='bvf_kpp')
+
+  id_rit_kpp = register_diag_field('ocean_model','rit_kpp',Grd%tracer_axes_wt(1:3), &
+       Time%model_time, 'T-cell Richardson number from KPP', 'none',       &
+       missing_value = missing_value, range=(/-1.e20,1.e20/),                &
+       standard_name='rit_kpp')
+
+  id_riu_kpp = register_diag_field('ocean_model','riu_kpp',Grd%vel_axes_wu(1:3), &
+       Time%model_time, 'U-cell Richardson number from KPP', 'none',       &
+       missing_value = missing_value, range=(/-1.e20,1.e20/),                &
+       standard_name='riu_kpp')
+
   id_ws = register_diag_field('ocean_model','wscale',Grd%tracer_axes(1:3), &
        Time%model_time, 'wscale from KPP', 'm',                            &
        missing_value = missing_value, range=(/-1.e5,1.e6/))
@@ -940,7 +1010,7 @@ end subroutine ocean_vert_kpp_mom4p1_init
 !
 ! </DESCRIPTION>
 !
-subroutine vert_mix_kpp_mom4p1 (aidif, Time, Thickness, Velocity, T_prog, T_diag, Dens, &
+subroutine vert_mix_kpp_mom4p1 (aidif, Time, Thickness, Velocity, T_prog, T_diag, Dens, Waves, &
                                 swflx, sw_frac_zt, pme, river, visc_cbu, diff_cbt, hblt_depth, do_wave)
 
   real,                            intent(in)    :: aidif
@@ -950,6 +1020,7 @@ subroutine vert_mix_kpp_mom4p1 (aidif, Time, Thickness, Velocity, T_prog, T_diag
   type(ocean_prog_tracer_type),    intent(inout) :: T_prog(:)
   type(ocean_diag_tracer_type),    intent(in)    :: T_diag(:)
   type(ocean_density_type),        intent(in)    :: Dens
+  type(ocean_wave_type),           intent(in)    :: Waves
   real, dimension(isd:,jsd:),      intent(in)    :: swflx
   real, dimension(isd:,jsd:,:),    intent(in)    :: sw_frac_zt
   real, dimension(isd:,jsd:),      intent(in)    :: pme
@@ -998,7 +1069,7 @@ subroutine vert_mix_kpp_mom4p1 (aidif, Time, Thickness, Velocity, T_prog, T_diag
     endif
 
 !-----------------------------------------------------------------------
-!     compute gradient Ri 
+!     compute gradient Ri (optional buoy. freq. for Stigebrandt scheme)
 !-----------------------------------------------------------------------
 
   call ri_for_kpp(Time, Thickness, aidif, Velocity, T_prog(index_temp)%field(:,:,:,taum1), &
@@ -1161,6 +1232,11 @@ subroutine vert_mix_kpp_mom4p1 (aidif, Time, Thickness, Velocity, T_prog, T_diag
                         +Velocity%smf_bgrid(i,j-1,2) + Velocity%smf_bgrid(i-1,j-1,2)) &
                    /active_cells
           ustar(i,j) = sqrt( sqrt(smftu**2 + smftv**2) )
+	  
+	  if (use_smyth_langmuir) then
+	    ! calculate langmuir number
+	    langmuir(i,j) = sqrt(ustar(i,j) / (enhance_stokesdrift*Waves%stokes(i,j)+epsln))
+	  endif
           
           Bo(i,j)    = grav * (talpha(i,j,1) * &
                  (wsfc(index_temp)%wsfc(i,j)+frazil(i,j)/(rho_cp*tracer_timestep))  &
@@ -2004,6 +2080,7 @@ subroutine wscale(iwscale_use_hbl_eq_zt, zt_kl, do_wave)
   real                :: zdiff, udiff, zfrac, ufrac, fzfrac
   real                :: wam, wbm, was, wbs, u3, langmuirfactor, Cw_smyth
   real                :: zehat           ! = zeta *  ustar**3
+  real                :: wstar, cw, smyth_factor
   integer             :: iz, izp1, ju, jup1
   integer             :: i, j
 
@@ -2051,6 +2128,20 @@ subroutine wscale(iwscale_use_hbl_eq_zt, zt_kl, do_wave)
 
           enddo
         enddo
+	
+	if (use_smyth_langmuir) then
+	  ! apply an enhancement factor to ws and wm to account for Langmuir circulation
+	  do j=jsc,jec
+            do i=isc,iec
+	      wstar        = von_karman*bfsfc(i,j)*zt_kl(i,j)
+	      u3           = ustar(i,j)*ustar(i,j)*ustar(i,j)
+	      cw           = smyth_cw0*(u3/(u3+wstar*wstar*wstar+epsln))**smyth_l                         ! Equation 13 in Smyth et al.
+	      smyth_factor = sqrt(1.0+cw/(langmuir(i,j)*langmuir(i,j)*langmuir(i,j)*langmuir(i,j)+epsln)) ! Equation 12 in Smyth et al.
+	      wm(i,j)      = wm(i,j)*smyth_factor
+	      ws(i,j)      = ws(i,j)*smyth_factor
+	    enddo
+	  enddo
+	endif
 
       else
 
@@ -2093,6 +2184,20 @@ subroutine wscale(iwscale_use_hbl_eq_zt, zt_kl, do_wave)
 
           enddo
         enddo
+	
+	if (use_smyth_langmuir) then
+	  ! apply an enhancement factor to ws and wm to account for Langmuir circulation
+	  do j=jsc,jec
+            do i=isc,iec
+	      wstar        = von_karman*bfsfc(i,j)*hbl(i,j)
+	      u3           = ustar(i,j)*ustar(i,j)*ustar(i,j)
+	      cw           = smyth_cw0*(u3/(u3+wstar*wstar*wstar+epsln))**smyth_l                         ! Equation 13 in Smyth et al.
+	      smyth_factor = sqrt(1.0+cw/(langmuir(i,j)*langmuir(i,j)*langmuir(i,j)*langmuir(i,j)+epsln)) ! Equation 12 in Smyth et al.
+	      wm(i,j)      = wm(i,j)*smyth_factor
+	      ws(i,j)      = ws(i,j)*smyth_factor
+	    enddo
+	  enddo
+	endif
 
       endif
 
@@ -2129,6 +2234,9 @@ end subroutine wscale
 !     inputs:
 !
 !      nk             = number of vertical levels                               <BR/>
+!      co_stigebrandt  = Stigebrandt(1987) constant for internal wave mixing    <BR/>
+!                       min(co_stigebrandt/buoyancy_freq,cx_stigebrandt)        <BR/>
+!      cx_stigebrandt = Stigebrandt(1987) maximum for internal wave mixing      <BR/>
 !      visc_cbu_iw    = background "visc_cbu" (m**2/sec) due to internal waves  <BR/>
 !      diff_cbt_iw    = background "diff_cbt" (m**2/sec) due to internal waves  <BR/>
 !      visc_cbu_limit = largest "visc_cbu" in regions of gravitational          <BR/>
@@ -2148,13 +2256,14 @@ subroutine ri_iwmix(visc_cbu, diff_cbt)
   real, dimension(isd:,jsd:,:,:), intent(inout) :: diff_cbt
   
   real, parameter :: Riinfty = 0.8  ! local Richardson Number limit for shear instability
-  real            :: Rigg, ratio, frit, fcont, friu, fconu
+  real            :: Rigg, ratio, frit, fcont, friu, fconu, diff_iw
   integer         :: i, j, k
 
   if (calc_visc_on_cgrid) then
 !-----------------------------------------------------------------------
 !     diffusion and viscosity coefficients on bottom of "T" cells
 !-----------------------------------------------------------------------
+     
 
       do k=1,nk-1
         do j=jsc,jec
@@ -2188,9 +2297,16 @@ subroutine ri_iwmix(visc_cbu, diff_cbt)
 !           eqn. (29).  Note: temporarily have visc_cbu on T-point.
 !-----------------------------------------------------------------------
 
-            visc_cbu(i,j,k)       = visc_cbu_iw + fconu * visc_con_limit   
-            diff_cbt(i,j,k,1)     = diff_cbt_iw + fcont * diff_con_limit
-            diff_cbt(i,j,k,2)     = diff_cbt_iw + fcont * diff_con_limit
+            if (do_stigebrandt) then
+               diff_iw               = amin1(co_stigebrandt/(bvf(i,j,k)+epsln),cx_stigebrandt)   
+               visc_cbu(i,j,k)       = diff_iw * cp_stigebrandt + fconu * visc_con_limit
+               diff_cbt(i,j,k,1)     = diff_iw + fcont * diff_con_limit
+               diff_cbt(i,j,k,2)     = diff_iw + fcont * diff_con_limit
+            else
+               visc_cbu(i,j,k)       = visc_cbu_iw + fconu * visc_con_limit   
+               diff_cbt(i,j,k,1)     = diff_cbt_iw + fcont * diff_con_limit
+               diff_cbt(i,j,k,2)     = diff_cbt_iw + fcont * diff_con_limit
+            endif
 
 !-----------------------------------------------------------------------
 !           add contribution due to shear instability
@@ -2236,9 +2352,16 @@ subroutine ri_iwmix(visc_cbu, diff_cbt)
 !           eqn. (29).  Note: temporarily have visc_cbu on T-point.
 !-----------------------------------------------------------------------
 
-            visc_cbu(i,j,k)       = visc_cbu_iw + fcont * visc_con_limit   
-            diff_cbt(i,j,k,1)     = diff_cbt_iw + fcont * diff_con_limit
-            diff_cbt(i,j,k,2)     = diff_cbt_iw + fcont * diff_con_limit
+            if (do_stigebrandt) then
+               diff_iw               = amin1(co_stigebrandt/(bvf(i,j,k)+epsln),cx_stigebrandt)   
+               visc_cbu(i,j,k)       = diff_iw * cp_stigebrandt + fcont * visc_con_limit   
+               diff_cbt(i,j,k,1)     = diff_iw + fcont * diff_con_limit
+               diff_cbt(i,j,k,2)     = diff_iw + fcont * diff_con_limit
+            else
+               visc_cbu(i,j,k)       = visc_cbu_iw + fcont * visc_con_limit   
+               diff_cbt(i,j,k,1)     = diff_cbt_iw + fcont * diff_con_limit
+               diff_cbt(i,j,k,2)     = diff_cbt_iw + fcont * diff_con_limit
+            endif
 
 !-----------------------------------------------------------------------
 !           add contribution due to shear instability
@@ -2704,15 +2827,15 @@ subroutine ri_for_kpp (Time, Thickness, aidif, Velocity, theta, salinity, &
   real    :: active_cells, fx, t1, riu_prev, tmp
 
   logical :: smooth_richardson_number = .true.
+  logical :: smooth_bvf = .true.
   integer :: num_smoothings = 1 ! for vertical smoothing of Richardson number
 
-
-  fx   = -0.25*grav*rho0r
+  fx   = -grav*rho0r ! use factor 0.25 below
 
   tau   = Time%tau
   taum1 = Time%taum1
 
-  ! compute density difference across bottom of T cells at tau-1
+  ! compute density difference across bottom of T cells at tau-1 (rho(k)-rho(k+1)<0)
 
   if (aidif == 1.0) then
     tlev = tau
@@ -2726,16 +2849,16 @@ subroutine ri_for_kpp (Time, Thickness, aidif, Velocity, theta, salinity, &
   do k=1,nk-1
      do j=jsd,jed-1
         do i=isd,ied-1
-           t1 = fx*Thickness%dzwt(i,j,k)
+  ! factor 0.25 for interpolation of 4 t-cells onto active u-cells
+           t1 = 0.25*fx*Thickness%dzwt(i,j,k)
            riu(i,j,k) = t1*Grd%umask(i,j,k+1) &
-                *(wrk1(i,j+1,k) + wrk1(i+1,j+1,k) + wrk1(i,j,k)   + wrk1(i+1,j,k)) /&
+                *(wrk1(i,j+1,k) + wrk1(i+1,j+1,k) + wrk1(i,j,k) + wrk1(i+1,j,k)) /&
                 ((Velocity%u(i,j,k,1,tlev) - Velocity%u(i,j,k+1,1,tlev))**2 + &
-                (Velocity%u(i,j,k,2,tlev) - Velocity%u(i,j,k+1,2,tlev))**2  &
+                 (Velocity%u(i,j,k,2,tlev) - Velocity%u(i,j,k+1,2,tlev))**2  &
                 + epsln)
         enddo
      enddo
   enddo
-
 
   ! smooth Richardson number in the vertical using a 1-2-1 filter:
   if (smooth_richardson_number) then 
@@ -2747,9 +2870,9 @@ subroutine ri_for_kpp (Time, Thickness, aidif, Velocity, theta, salinity, &
                    kmax = Grd%kmu(i,j)
                    if (kmax > 0) then
                        do k=2,kmax-2
-                          tmp        =  riu(i,j,k)
+                          tmp        = riu(i,j,k)
                           riu(i,j,k) = riu_prev + 0.5 * riu(i,j,k) + 0.25 * riu(i,j,k+1)
-                          riu_prev   =  0.25 * tmp
+                          riu_prev   = 0.25 * tmp
                        enddo
                    endif
                 enddo
@@ -2763,9 +2886,9 @@ subroutine ri_for_kpp (Time, Thickness, aidif, Velocity, theta, salinity, &
                    kmax = Grd%kmt(i,j)
                    if (kmax > 0) then
                        do k=2,kmax-2
-                          tmp        =  riu(i,j,k)
+                          tmp        = riu(i,j,k)
                           riu(i,j,k) = riu_prev + 0.5 * riu(i,j,k) + 0.25 * riu(i,j,k+1)
-                          riu_prev   =  0.25 * tmp
+                          riu_prev   = 0.25 * tmp
                        enddo
                    endif
                 enddo
@@ -2781,10 +2904,10 @@ subroutine ri_for_kpp (Time, Thickness, aidif, Velocity, theta, salinity, &
   do k=1,nk-1
     do j=jsc,jec
       do i=isc,iec
-        active_cells = Grd%umask(i,j,k+1) + Grd%umask(i-1,j,k+1) &
+        active_cells = Grd%umask(i,j,k+1)   + Grd%umask(i-1,j,k+1) &
                      + Grd%umask(i,j-1,k+1) + Grd%umask(i-1,j-1,k+1) + epsln
-        rit(i,j,k)   = (riu(i,j,k) + riu(i-1,j,k)  &
-                      + riu(i,j-1,k) + riu(i-1,j-1,k))/active_cells
+        rit(i,j,k)   = (riu(i,j,k)   + riu(i-1,j,k)  &
+                     +  riu(i,j-1,k) + riu(i-1,j-1,k))*Grd%tmask(i,j,k+1)/active_cells
 
         ! make sure no static instability exists (one that is not seen
         ! by the Richardson number).  This may happen due to
@@ -2798,6 +2921,36 @@ subroutine ri_for_kpp (Time, Thickness, aidif, Velocity, theta, salinity, &
       enddo
     enddo
   enddo
+
+  ! save Bruunt-Väisälä or buoyancy frequency for Stigebrandt scheme
+  if (do_stigebrandt) then
+     
+     bvf(:,:,:) = fx*wrk1(:,:,:)*Grd%tmask(:,:,:)/(Thickness%dzwt(:,:,:)+epsln)
+     bvf(:,:,:) = sqrt(amax1(bvf(:,:,:),0e0)) ! set bvf=0 if instable bvf**2<0
+
+  ! smooth in the vertical using a 1-2-1 filter (use t1 as buffer)
+     if (smooth_bvf) then 
+        do mr = 1,num_smoothings
+           do j=jsd,jed-1
+              do i=isd,ied-1
+                 t1   =  0.25 * bvf(i,j,1)
+                 kmax = Grd%kmt(i,j)
+                 if (kmax > 2) then
+                     do k=2,kmax-1
+                        tmp        = bvf(i,j,k)
+                        bvf(i,j,k) = t1 + 0.5 * bvf(i,j,k) + 0.25 * bvf(i,j,k+1)
+                        t1   = 0.25 * tmp
+                     enddo
+                 endif
+              enddo
+           enddo
+        enddo
+     endif
+    
+    call diagnose_3d(Time, Grd, id_bvf_kpp, bvf(:,:,:))
+  endif
+  call diagnose_3d(Time, Grd, id_rit_kpp,  rit(:,:,:))
+  call diagnose_3d(Time, Grd, id_riu_kpp,  riu(:,:,:))
 
 end subroutine ri_for_kpp
 ! </SUBROUTINE> NAME="ri_for_kpp"

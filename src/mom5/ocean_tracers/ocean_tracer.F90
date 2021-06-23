@@ -218,6 +218,7 @@ use ocean_types_mod,            only: ocean_lagrangian_type, ocean_velocity_type
 use ocean_util_mod,             only: write_timestamp, diagnose_2d, diagnose_3d, diagnose_sum, write_chksum_3d
 use ocean_tracer_util_mod,      only: diagnose_3d_rho
 use ocean_vert_mix_mod,         only: vert_diffuse, vert_diffuse_implicit
+use wave_types_mod,             only: ocean_wave_type
 use ocean_workspace_mod,        only: wrk1, wrk2, wrk3, wrk4, wrk5, wrk6, wrk1_2d
 
 implicit none
@@ -2182,7 +2183,8 @@ end function ocean_diag_tracer_init  !}
 !
 subroutine update_ocean_tracer (Time, Dens, Adv_vel, Thickness, pme, diff_cbt, &
                                 T_prog, T_diag, L_system,   &
-                                Velocity, Ext_mode, EL_diag, use_blobs)
+                                Velocity, Ext_mode, EL_diag, use_blobs, Waves, &
+				surf_blthick)
 
   type(ocean_time_type),          intent(in)    :: Time 
   type(ocean_density_type),       intent(inout) :: Dens
@@ -2198,6 +2200,8 @@ subroutine update_ocean_tracer (Time, Dens, Adv_vel, Thickness, pme, diff_cbt, &
   type(ocean_external_mode_type), intent(in)    :: Ext_mode
   type(blob_diag_type),           intent(inout) :: EL_diag(0:)
   logical,                        intent(in)    :: use_blobs
+  type(ocean_wave_type),          intent(in)    :: Waves
+  real, dimension(isd:,jsd:),     intent(in)    :: surf_blthick
  
   type(time_type) :: next_time
   type(time_type) :: time_step
@@ -2244,7 +2248,7 @@ subroutine update_ocean_tracer (Time, Dens, Adv_vel, Thickness, pme, diff_cbt, &
         call mpp_clock_end(id_clock_tracer_advect)
         
         call mpp_clock_begin(id_clock_lap_tracer)
-          call lap_tracer(Time, Thickness, T_prog(n), n)
+          call lap_tracer(Time, Thickness, T_prog(n), n, Waves, surf_blthick)
         call mpp_clock_end(id_clock_lap_tracer)
 
         call mpp_clock_begin(id_clock_bih_tracer)

@@ -357,7 +357,9 @@ ierr = check_nml_error(io_status,'ocean_solo_nml')
              Ice_ocean_boundary% fprec (isc:iec,jsc:jec),           &
              Ice_ocean_boundary% runoff (isc:iec,jsc:jec),          &
              Ice_ocean_boundary% calving (isc:iec,jsc:jec),         &
-             Ice_ocean_boundary% p (isc:iec,jsc:jec))
+             Ice_ocean_boundary% p (isc:iec,jsc:jec),               &
+             Ice_ocean_boundary% coszen (isc:iec,jsc:jec),          &
+             Ice_ocean_boundary% mi (isc:iec,jsc:jec))
 
   Ice_ocean_boundary%u_flux          = 0.0
   Ice_ocean_boundary%v_flux          = 0.0

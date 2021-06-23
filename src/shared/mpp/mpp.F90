@@ -1,3 +1,10 @@
+!<CONTACT EMAIL="klaus-ketelsen@t-online.de"> Klaus Ketelsen 
+!</CONTACT>
+!<DESCRIPTION>
+!  IOW version 3.0 from 2014/11/28 of shared/drifters package
+!  mpp_comm_private set to public by Klaus Ketelsen (!kk)
+!</DESCRIPTION>
+
 !-----------------------------------------------------------------------
 !                 Communication for message-passing codes
 !
@@ -1107,7 +1114,7 @@ private
   logical              :: debug = .false.
   integer              :: npes=1, root_pe=0, pe=0
   integer(LONG_KIND)   :: tick, ticks_per_sec, max_ticks, start_tick, end_tick, tick0=0
-  integer              :: mpp_comm_private
+  integer,public       :: mpp_comm_private                              !kk public by kk
   logical              :: first_call_system_clock_mpi=.TRUE.
   real(DOUBLE_KIND)    :: mpi_count0=0  ! use to prevent integer overflow
   real(DOUBLE_KIND)    :: mpi_tick_rate=0.d0  ! clock rate for mpi_wtick()

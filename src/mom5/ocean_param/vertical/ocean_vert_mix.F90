@@ -252,6 +252,7 @@ use ocean_types_mod,           only: ocean_grid_type, ocean_domain_type, ocean_t
 use ocean_types_mod,           only: ocean_time_type, ocean_time_steps_type, ocean_options_type
 use ocean_types_mod,           only: ocean_velocity_type, ocean_adv_vel_type, ocean_density_type
 use ocean_types_mod,           only: ocean_prog_tracer_type, ocean_diag_tracer_type
+use wave_types_mod,            only: ocean_wave_type
 use ocean_util_mod,            only: invtri, invtri_bmf, write_timestamp
 use ocean_util_mod,            only: write_chksum_3d, diagnose_2d, diagnose_3d, diagnose_3d_u, diagnose_2d_u, diagnose_sum, diagnose_2d_en
 use ocean_tracer_util_mod,     only: diagnose_3d_rho
@@ -661,7 +662,7 @@ integer :: isd, ied, jsd, jed, isc, iec, jsc, jec, nk
 real, dimension(:,:,:), allocatable :: flux_z
 
 character(len=128) :: version = &
-     '$Id: ocean_vert_mix.F90,v 20.0 2013/12/14 00:16:48 fms Exp $'
+     '$Id: ocean_vert_mix.F90,v 20.0 2013/12/14 00:16:48 fms Exp IOW$'
 character (len=128) :: tagname = &
      '$Name: tikal $'
 
@@ -2783,7 +2784,7 @@ end subroutine watermass_diag_init
 ! </DESCRIPTION>
 !
 subroutine vert_mix_coeff(Time, Thickness, Velocity, T_prog,   &
-                          T_diag, Dens, swflx, sw_frac_zt, pme,&
+                          T_diag, Dens, Waves, swflx, sw_frac_zt, pme,&
                           river, visc_cbu, visc_cbt, diff_cbt, hblt_depth, do_wave)
 
   type(ocean_time_type),          intent(in)    :: Time
@@ -2792,6 +2793,7 @@ subroutine vert_mix_coeff(Time, Thickness, Velocity, T_prog,   &
   type(ocean_prog_tracer_type),   intent(inout) :: T_prog(:)
   type(ocean_diag_tracer_type),   intent(in)    :: T_diag(:)
   type(ocean_density_type),       intent(in)    :: Dens
+  type(ocean_wave_type),          intent(in)    :: Waves
   real, dimension(isd:,jsd:),     intent(in)    :: swflx
   real, dimension(isd:,jsd:,:),   intent(in)    :: sw_frac_zt
   real, dimension(isd:,jsd:),     intent(in)    :: pme
@@ -2837,7 +2839,7 @@ subroutine vert_mix_coeff(Time, Thickness, Velocity, T_prog,   &
 
   elseif(MIX_SCHEME == VERTMIX_KPP_MOM4P1) then 
     call mpp_clock_begin(id_clock_vert_kpp_mom4p1)
-    call vert_mix_kpp_mom4p1(aidif, Time, Thickness, Velocity, T_prog, T_diag, Dens, &
+    call vert_mix_kpp_mom4p1(aidif, Time, Thickness, Velocity, T_prog, T_diag, Dens, Waves, &
                       swflx, sw_frac_zt, pme, river, visc_cbu, diff_cbt, hblt_depth, do_wave)
     ! since this scheme is frozen, we do not compute visc_cbt. 
     ! for vertical reynolds diagnostics, we set  

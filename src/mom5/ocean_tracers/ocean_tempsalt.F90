@@ -702,7 +702,7 @@ function contemp_from_pottemp_field (salinity, theta)
 
                t1  = one_over_40*theta(i,j,k)
                s1  = one_over_40*sfac*salinity(i,j,k)
-               sp5 = sqrt(s1)
+               sp5 = sqrt(max(s1,0.0))
 
                contemp_from_pottemp_field(i,j,k) =                                  &
                     v0*(v1+t1*(v2+t1*(v3+t1*(v4+t1*(v5+t1*(v6+t1*(v7+v8*t1))))))  + &
@@ -724,7 +724,7 @@ function contemp_from_pottemp_field (salinity, theta)
 
                t1  = one_over_40*theta(i,j,k)
                s1  = one_over_40*salinity(i,j,k)
-               sp5 = sqrt(s1)                                       
+               sp5 = sqrt(max(s1,0.0))                                       
 
                contemp_from_pottemp_field(i,j,k) =                                  &
                     c0*(c1+t1*(c2+t1*(c3+t1*(c4+t1*(c5+t1*(c6+(c7+c8*t1)*t1)))))  + &  

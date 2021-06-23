@@ -80,6 +80,12 @@ module ocean_shortwave_jerlov_mod
 ! Journal of Physical Oceanography vol 18 pages 1601-1626.
 ! </REFERENCE>
 !
+! <REFERENCE>
+! Neumann et al. (2015)
+! A new radiation model for Baltic Sea ecosystem modelling.
+! Journal of Marine Systems, Volume 152
+! </REFERENCE>
+!
 ! </INFO>
 !
 !<NAMELIST NAME="ocean_shortwave_jerlov_nml">
@@ -123,7 +129,7 @@ module ocean_shortwave_jerlov_mod
 !   Below this depth, shortwave penetration is exponentially 
 !   small and so is ignored.
 !  </DATA>
-!  <DATA NAME="baltic_optics, jerlov_1, jerlov_2, jerlov_3, jerlov_1a, jerlov_1b" TYPE="logical">
+!  <DATA NAME="baltic_model, baltic_optics, jerlov_1, jerlov_2, jerlov_3, jerlov_1a, jerlov_1b" TYPE="logical">
 !   Logical switch to select a watertype. Default=.false.. The model stops, if none is selected
 !   and override_coeff=.false..  
 !  </DATA>
@@ -138,12 +144,25 @@ module ocean_shortwave_jerlov_mod
 !  if the surface elevation is small compared with the upper cells' thickness.
 !  The default is .false.
 !  </DATA> 
+!  <DATA NAME="use_sun_angle" TYPE="logical">
+!  Use the sun angle to calculate shortwave radiation penetration
+!  Default use_sun_angle=.false.
+!  </DATA> 
+!  <DATA NAME="use_sun_angle_par" TYPE="logical">
+!  Use the sun angle to calculate photosynthetically active radiation profile
+!  Default use_sun_angle_par=.false.
+!  </DATA> 
+!  <DATA NAME="par_opacity_from_bio" TYPE="logical">
+!  Use opacity parameters from ecosystem model for photosynthetically active radiation
+!  Default par_opacity_from_bio=.false.
+!  </DATA> 
 !  <DATA NAME="debug_this_module" TYPE="logical">
 !  For debugging purposes.
 !  </DATA> 
 !</NAMELIST>
 
 use constants_mod,            only: epsln
+use field_manager_mod,        only: fm_get_index
 use fms_mod,                  only: write_version_number, open_namelist_file
 use fms_mod,                  only: close_file, check_nml_error
 use fms_mod,                  only: stdout, stdlog, FATAL, NOTE
@@ -157,7 +176,7 @@ use ocean_parameters_mod,     only: GEOPOTENTIAL
 use ocean_types_mod,          only: ocean_time_type, ocean_domain_type, ocean_grid_type
 use ocean_types_mod,          only: ocean_prog_tracer_type, ocean_thickness_type
 use ocean_types_mod,          only:  ocean_options_type, ocean_diag_tracer_type
-use ocean_workspace_mod,      only: wrk1, wrk3, wrk4 
+use ocean_workspace_mod,      only: wrk1, wrk2, wrk3, wrk4 
 
 implicit none
 
@@ -168,7 +187,8 @@ integer :: vert_coordinate
 
 ! clock ids
 integer :: id_sw_pen
-
+integer :: index_opacity_bio, index_opacity_water          ! stores the index of opacity of water and its
+                                                           ! biological ingredients in the array T_diag
 logical :: verbose_flag=.false.
 
 #include <ocean_memory.h>
@@ -190,7 +210,7 @@ logical :: verbose_flag=.false.
 type(ocean_domain_type), pointer :: Dom => NULL()
 type(ocean_grid_type),   pointer :: Grd => NULL()
 
-character(len=128)  :: version='$Id: ocean_shortwave_jerlov.F90,v 20.0 2013/12/14 00:16:20 fms Exp $'
+character(len=128)  :: version='$Id: ocean_shortwave_jerlov.F90,v 20.0 2013/12/14 00:16:20 fms Exp IOW$'
 character (len=128) :: tagname = '$Name: tikal $'
 character(len=48), parameter          :: mod_name = 'ocean_shortwave_jerlov_mod'
 
@@ -214,9 +234,15 @@ logical :: jerlov_3               = .false.
 logical :: jerlov_1a              = .false. 
 logical :: jerlov_1b              = .false. 
 logical :: baltic_optics          = .false.
-real    :: rpart_in               = 0.58  !Jerlov I
-real    :: coef1_in               = 0.35  !Jerlov I
-real    :: coef2_in               = 23.   !Jerlov I
+logical :: baltic_model           = .false.
+logical :: use_sun_angle          = .false.  ! use sun angle for calculation of shortwave heating
+logical :: use_sun_angle_par      = .false.  ! use sun angle for opacity calculation for 
+                                             !   photosynthetically active radiation
+logical :: par_opacity_from_bio   = .false.  ! use opacity of biological tracers for 
+                                             !   photosynthetically active radiation
+real    :: rpart_in               = 0.58     ! Jerlov I
+real    :: coef1_in               = 0.35     ! Jerlov I
+real    :: coef2_in               = 23.      ! Jerlov I
 
 real :: zmax_pen      = 120.0 ! maximum depth (m) of solar penetration. 
                               ! below, penetration is exponentially small and so is ignored
@@ -227,8 +253,11 @@ namelist /ocean_shortwave_jerlov_nml/ use_this_module,                   &
                                enforce_sw_frac, override_f_vis,          &
                                override_coeff,                           & 
                                sw_pen_fixed_depths , baltic_optics,      &
+                               baltic_model,                             &
                                jerlov_1, jerlov_2, jerlov_3, jerlov_1a,  &
                                jerlov_1b, f_vis_in,                      &
+                               use_sun_angle, use_sun_angle_par,         &
+                               par_opacity_from_bio,                     &
                                rpart_in, coef1_in, coef2_in 
 
 contains
@@ -245,6 +274,14 @@ contains
     type(ocean_domain_type),  intent(in), target :: Domain
     integer,                  intent(in)         :: ver_coordinate
     type(ocean_options_type), intent(inout)      :: Ocean_options
+
+    character(len=48),  parameter :: sub_name = 'ocean_shortwave_jerlov_init'
+    character(len=256), parameter :: error_header = '==>Error from ' // trim(mod_name) //   &
+                                                    '(' // trim(sub_name) // '): '
+    character(len=256), parameter :: warn_header = '==>Warning from ' // trim(mod_name) //  &
+                                                   '(' // trim(sub_name) // '): '
+    character(len=256), parameter :: note_header = '==>Note from ' // trim(mod_name) //     &
+                                                   '(' // trim(sub_name) // '): '
 
     real    :: coef1, coef2, efold1, efold2, depth
     integer :: unit, io_status, ierr, k, nopt
@@ -379,6 +416,14 @@ contains
         coef2 = 3.3
         nopt = nopt + 1
     endif
+    if(baltic_model) then
+        write(stdoutunit,*)' ==>Note: Setting optical model coefficients for Baltic model.'
+        write(stdoutunit,*)' ==>Note: Opacities from bio-model will be used instead of z2.' 
+        rpart = 0.521
+        coef1 = 0.15
+        coef2 = 3.3
+        nopt = nopt + 1
+    endif
     if(override_coeff) then
         write(stdoutunit,*)' ==>Note: Setting optical model coefficients from namelist.'
         rpart = rpart_in
@@ -429,6 +474,28 @@ contains
       enddo
     endif  
 
+    if (par_opacity_from_bio) then    
+       index_opacity_bio   = fm_get_index('/ocean_mod/diag_tracers/opacity_bio')
+       index_opacity_water = fm_get_index('/ocean_mod/diag_tracers/opacity_water')
+    
+       if (index_opacity_bio .le. 0) then
+          call mpp_error(FATAL, &
+             '==>Error: par_opacity_from_bio in ocean_shortwave_jerlov is set to .true., ' &
+             //'but diagnostic tracer opacity_bio is not defined.')
+       endif
+       if (index_opacity_water .le. 0) then
+          call mpp_error(FATAL, &
+             '==>Error: par_opacity_from_bio in ocean_shortwave_jerlov is set to .true., ' & 
+             //'but diagnostic tracer opacity_water is not defined.')
+       endif
+    endif
+
+    if (baltic_model .and. .not. par_opacity_from_bio) then
+       call mpp_error(FATAL, &
+             '==>Error: baltic_model in ocean_shortwave_jerlov is set to .true., ' &
+             //'it needs par_opacity_from_bio set .true. as well.')
+    endif
+
 end subroutine ocean_shortwave_jerlov_init
 ! </SUBROUTINE> NAME="ocean_shortwave_jerlov_init"
 
@@ -446,7 +513,7 @@ end subroutine ocean_shortwave_jerlov_init
 ! surface tracer flux "stf(i,j,temp)"
 !
 ! </DESCRIPTION>
-subroutine sw_source_jerlov (Thickness, T_diag, swflx, swflx_vis, index_irr, Temp, sw_frac_zt, opacity)
+subroutine sw_source_jerlov (Thickness, T_diag, swflx, swflx_vis, index_irr, Temp, sw_frac_zt, opacity, coszen)
 
   type(ocean_thickness_type),    intent(in)    :: Thickness
   type(ocean_diag_tracer_type),  intent(inout) :: T_diag(:)
@@ -456,12 +523,16 @@ subroutine sw_source_jerlov (Thickness, T_diag, swflx, swflx_vis, index_irr, Tem
   type(ocean_prog_tracer_type),  intent(inout) :: Temp
   real, dimension(isd:,jsd:,:),  intent(inout) :: sw_frac_zt
   real, dimension(isd:,jsd:,:),  intent(inout) :: opacity
+  real, dimension(isd:,jsd:),    intent(in)    :: coszen 
 
   real, dimension(isd:ied,jsd:jed)       :: f_vis
+  real, dimension(isd:ied,jsd:jed)       :: rscl_ir      ! inverse depth scale for infrared absorption [1/m]
+                                                         ! depends on local sun angle
     
-  real    :: efold1, efold2, efold_ir, zenith_angle, depth
+  real    :: efold1, efold2, efold_ir, depth
   real    :: swmax, swmin
-
+  real    :: sinzen_w, coszen_w                          ! sine and cosine of the solar zenith angle in the water
+                                                         ! that is, after refraction at the sea surface
   real    :: div_sw 
   integer :: i, j, k, kp1
 
@@ -504,18 +575,66 @@ subroutine sw_source_jerlov (Thickness, T_diag, swflx, swflx_vis, index_irr, Tem
     enddo
   endif
   
-! If the zenith angle comes from astronomy, move these lines into the i,j-loops
-  zenith_angle = 0.0
-!  rscl_ir = -1./(0.267 * cos(zenith_angle))
-  rscl_ir = -1./0.267 
+  if (use_sun_angle) then
+     do i=isc,iec
+        do j=jsc,jec
+           sinzen_w=sqrt(1-coszen(i,j)**2)/1.33        ! refraction of light at sea surface
+                                               ! sin beta = sin alpha / 1.33
+           coszen_w=sqrt(1-sinzen_w**2)     
+           rscl_ir(i,j) = -1./(0.267 * coszen_w)
+        enddo
+     enddo
+  else
+    rscl_ir(:,:) = -1./0.267 
+  endif
+
+  ! Compute opacity, which is used by biogeochemistry. 
+  ! We split off the k=1 level, since sw_frac_zw(k=0)=sw_frac_top,
+  ! which is typically set to sw_frac_top=0.0 for purposes of 
+  ! accounting (as swflx is also in stf(index_temp). A value 
+  ! of sw_frac_zw(k=0)=0.0 to compute opacity would result in a
+  ! negative opacity at k=1, which is not physical. Instead, for 
+  ! purposes of opacity calculation, we need sw_frac_zw(k=0)=1.0. 
+  !
+  ! if opacity is provided by bio, we can do it here
+  if (par_opacity_from_bio) then
+     if (use_sun_angle_par) then
+        do j=jsc,jec
+           do i=isc,iec
+              ! use wrk2 array to store inverse cosine of underwater zenith angle
+              ! sin beta = sin alpha / 1.33
+              sinzen_w    = sqrt(1-coszen(i,j)**2)/1.33            ! cos alpha => sin beta
+              wrk2(i,j,1) = 1/(sqrt(1-sinzen_w**2)+epsln)          ! sin beta  => 1/cos beta
+           enddo
+        enddo
+        do k=1,nk-1
+           do j=jsc,jec
+              do i=isc,iec
+                 opacity(i,j,k) = (T_diag(index_opacity_water)%field(i,j,k) &
+                              +T_diag(index_opacity_bio  )%field(i,j,k))*wrk2(i,j,1)
+              enddo
+           enddo
+        enddo
+     else
+        do k=1,nk-1
+           do j=jsc,jec
+              do i=isc,iec
+                 opacity(i,j,k) = (T_diag(index_opacity_water)%field(i,j,k) &
+                              +T_diag(index_opacity_bio  )%field(i,j,k))
+              enddo
+           enddo
+        enddo
+     endif
+  endif
+! end compute opacity
   
   if(sw_pen_fixed_depths) then 
 
      do k=1,nk
         depth = Grd%zt(k)
-        efold_ir = exp( depth * rscl_ir )
         do j=jsc,jec
            do i=isc,iec
+              efold_ir = exp( depth * rscl_ir(i,j) )
               if ( depth <= zmax_pen .and. Grd%tmask(i,j,k) /= 0) then
                  sw_frac_zt(i,j,k) = (1-f_vis(i,j)) *efold_ir    &
                           + f_vis(i,j)  * sw_frac_zt_fix(k)
@@ -526,9 +645,9 @@ subroutine sw_source_jerlov (Thickness, T_diag, swflx, swflx_vis, index_irr, Tem
      do k=1,nk-1
         kp1 = k+1
         depth = Grd%zw(k)
-        efold_ir = exp( depth * rscl_ir )
         do j=jsc,jec
            do i=isc,iec
+              efold_ir = exp( depth * rscl_ir(i,j) )
               if ( depth <= zmax_pen .and. Grd%tmask(i,j,kp1) /= 0) then
                  sw_frac_zw(i,j,k) = (1-f_vis(i,j)) * efold_ir   &
                           + f_vis(i,j)  * sw_frac_zw_fix(k)
@@ -573,9 +692,13 @@ subroutine sw_source_jerlov (Thickness, T_diag, swflx, swflx_vis, index_irr, Tem
            do i=isc,iec
               depth = wrk3(i,j,k)
               if ( depth <= zmax_pen .and. Grd%tmask(i,j,k) /= 0) then
+                 if (baltic_model) then
+                    efold2   = depth * opacity(i,j,k) * (-1.0)
+                 else
+                    efold2   = depth * rscl2
+                 endif
                  efold1   = depth * rscl1
-                 efold2   = depth * rscl2
-                 efold_ir = depth * rscl_ir
+                 efold_ir = depth * rscl_ir(i,j)
                  sw_frac_zt(i,j,k) = (1-f_vis(i,j)) * exp( efold_ir )   &
                           + f_vis(i,j)  * ( rpart*exp(efold1) + (1.-rpart)*exp(efold2) )
               endif
@@ -591,9 +714,13 @@ subroutine sw_source_jerlov (Thickness, T_diag, swflx, swflx_vis, index_irr, Tem
            do i=isc,iec
               depth = wrk4(i,j,k)
               if ( depth <= zmax_pen .and. Grd%tmask(i,j,kp1) /= 0) then
+                 if (baltic_model) then
+                    efold2   = depth * opacity(i,j,k) * (-1.0)
+                 else
+                    efold2   = depth * rscl2
+                 endif
                  efold1   = depth * rscl1
-                 efold2   = depth * rscl2
-                 efold_ir = depth * rscl_ir
+                 efold_ir = depth * rscl_ir(i,j)
                  sw_frac_zw(i,j,k) = (1-f_vis(i,j)) * exp( efold_ir )   &
                           + f_vis(i,j)  * ( rpart*exp(efold1) + (1.-rpart)*exp(efold2) )
               endif
@@ -631,7 +758,7 @@ subroutine sw_source_jerlov (Thickness, T_diag, swflx, swflx_vis, index_irr, Tem
       enddo
     enddo
   enddo
-  
+
   ! Compute opacity, which is used by biogeochemistry. 
   ! We split off the k=1 level, since sw_frac_zw(k=0)=sw_frac_top,
   ! which is typically set to sw_frac_top=0.0 for purposes of 
@@ -639,26 +766,54 @@ subroutine sw_source_jerlov (Thickness, T_diag, swflx, swflx_vis, index_irr, Tem
   ! of sw_frac_zw(k=0)=0.0 to compute opacity would result in a
   ! negative opacity at k=1, which is not physical. Instead, for 
   ! purposes of opacity calculation, we need sw_frac_zw(k=0)=1.0. 
-  k=1
-  do j=jsc,jec
-     do i=isc,iec           
-        opacity(i,j,k) = -log( sw_frac_zw(i,j,k)/(f_vis(i,j)+epsln) + epsln) &
-                          /(Thickness%dzt(i,j,k) + epsln)
-     enddo
-  enddo
-  do k=2,nk-1
-     do j=jsc,jec
-        do i=isc,iec           
-           opacity(i,j,k) = -log( sw_frac_zw(i,j,k)/(sw_frac_zw(i,j,k-1)+epsln) + epsln) &
-                             /(Thickness%dzt(i,j,k) + epsln)
+  ! 
+  ! have it here because opacity depend on sw_frac in case of opacity comes not from bio
+  if (.not. par_opacity_from_bio) then
+     if (use_sun_angle_par) then
+        k=1
+        do j=jsc,jec
+           do i=isc,iec
+              ! use wrk2 array to store inverse cosine of underwater zenith angle
+          ! sin beta = sin alpha / 1.33
+          sinzen_w    = sqrt(1-coszen(i,j)**2)/1.33            ! cos alpha => sin beta
+          wrk2(i,j,1) = 1/(sqrt(1-sinzen_w**2)+epsln)          ! sin beta  => 1/cos beta
+          opacity(i,j,k) = -log( sw_frac_zw(i,j,k)/(f_vis(i,j)+epsln) + epsln) &
+                            /(Thickness%dzt(i,j,k) + epsln)*wrk2(i,j,1)
+           enddo
         enddo
-     enddo
-  enddo
+        do k=2,nk-1
+           do j=jsc,jec
+              do i=isc,iec
+                 opacity(i,j,k) = -log( sw_frac_zw(i,j,k)/(sw_frac_zw(i,j,k-1)+epsln) + epsln) &
+                               /(Thickness%dzt(i,j,k) + epsln)*wrk2(i,j,1)
+              enddo
+           enddo
+        enddo
+     else
+        k=1
+        do j=jsc,jec
+           do i=isc,iec
+              opacity(i,j,k) = -log( sw_frac_zw(i,j,k)/(f_vis(i,j)+epsln) + epsln) &
+                            /(Thickness%dzt(i,j,k) + epsln)
+           enddo
+        enddo
+        do k=2,nk-1
+           do j=jsc,jec
+              do i=isc,iec
+                 opacity(i,j,k) = -log( sw_frac_zw(i,j,k)/(sw_frac_zw(i,j,k-1)+epsln) + epsln) &
+                               /(Thickness%dzt(i,j,k) + epsln)
+              enddo
+           enddo
+        enddo
+     endif
+  endif
+
+  
   if(debug_this_module) then 
      do k=2,nk
         swmax=maxval(sw_frac_zw(isc:iec,jsc:jec,k))
         call mpp_max(swmax);write(stdoutunit,*)'In ocean_shortwave_jerlov : max sw_fk_zw=',swmax
-        swmin=maxval(sw_frac_zw(isc:iec,jsc:jec,k))
+        swmin=minval(sw_frac_zw(isc:iec,jsc:jec,k))
         call mpp_min(swmin);write(stdoutunit,*)'In ocean_shortwave_jerlov : min sw_fk_zw=',swmin
      enddo
   endif

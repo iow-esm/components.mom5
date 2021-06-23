@@ -401,7 +401,7 @@ subroutine ocean_velocity_init (Grid, Domain, Time, Time_steps, Ocean_options, &
   allocate (Velocity%cdbot_array(isd:ied,jsd:jed))
   allocate (Velocity%rossby_radius(isd:ied,jsd:jed))
   allocate (Velocity%stokes_depth(isd:ied,jsd:jed))
-  allocate (Velocity%stokes_drift(isd:ied,jsd:jed,nk,2))
+  allocate (Velocity%stokes_drift(isd:ied,jsd:jed,0:nk,2))
   allocate (Velocity%press_force(isd:ied,jsd:jed,nk,2))
   allocate (Velocity%accel(isd:ied,jsd:jed,nk,2))
   allocate (Velocity%source(isd:ied,jsd:jed,nk,2))
@@ -863,16 +863,16 @@ end subroutine ocean_velocity_init
             ' Baroclinic time step stability most nearly violated at U-cell (i,j) = (',&
                  icg+Dom%ioff,',',jcg+Dom%joff,'), (lon,lat) = (',Grd%xu(icg,jcg),',',Grd%yu(icg,jcg),').'
             write(unit,'(a,i6)')    '         The number of kmu-levels  at this point is ',Grd%kmu(icg,jcg) 
-            write(unit,'(a,e12.6)') '         The dxu grid distance (m) at this point is ',Grd%dxu(icg,jcg) 
-            write(unit,'(a,e12.6)') '         The dyu grid distance (m) at this point is ',Grd%dyu(icg,jcg) 
+            write(unit,'(a,e13.6)') '         The dxu grid distance (m) at this point is ',Grd%dxu(icg,jcg) 
+            write(unit,'(a,e13.6)') '         The dyu grid distance (m) at this point is ',Grd%dyu(icg,jcg) 
             cfl_error=.false.
         else
             write (unit,'(/a,i4,a,i4,a,f9.2,a,f9.2,a)') &
             '==>Error: Baroclinic time step stability violated at U-cell (i,j) = (',&
                  icg+Dom%ioff,',',jcg+Dom%joff,'), (lon,lat) = (',Grd%xu(icg,jcg),',',Grd%yu(icg,jcg),').'
             write(unit,'(a,i6)')    '         The number of kmu-levels  at this point is ',Grd%kmu(icg,jcg) 
-            write(unit,'(a,e12.6)') '         The dxu grid distance (m) at this point is ',Grd%dxu(icg,jcg) 
-            write(unit,'(a,e12.6)') '         The dyu grid distance (m) at this point is ',Grd%dyu(icg,jcg) 
+            write(unit,'(a,e13.6)') '         The dxu grid distance (m) at this point is ',Grd%dxu(icg,jcg) 
+            write(unit,'(a,e13.6)') '         The dyu grid distance (m) at this point is ',Grd%dyu(icg,jcg) 
             cfl_error=.true.
         endif
         write (unit,'(a,f5.2,a/a,f6.0,a,f6.0,a)')&

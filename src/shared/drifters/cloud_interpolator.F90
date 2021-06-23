@@ -1,14 +1,38 @@
 ! nf95 -r8 -g -I ~/regression/ia64/23-Jun-2005/CM2.1U_Control-1990_E1.k32pe/include/ -D_TEST_CLOUD_INTERPOLATOR -D_F95 cloud_interpolator.F90
 
+!<CONTACT EMAIL="klaus-ketelsen@t-online.de"> Klaus Ketelsen 
+!</CONTACT>
+!<DESCRIPTION>
+!  IOW version 3.0 from 2014/11/28
+!  code changes: for 2D simple+fast subroutines by Klaus Ketelsen (!kk)
+!  cld_ntrp_get_cell_values_2D & cld_ntrp_linear_cell_interp
+!  explicit interfaces instead of _PURE option   
+!</DESCRIPTION>
+! iow ! #define _DEBUG 
+
 #include <fms_platform.h>
 
 #define _FLATTEN(A) reshape((A), (/size((A))/) )
 
 MODULE cloud_interpolator_mod
+  USE mpp_mod,       ONLY: stdlog
   implicit none
   private
 
+  interface cld_ntrp_linear_cell_interp
+    module procedure cld_ntrp_linear_cell_interp
+  end interface cld_ntrp_linear_cell_interp
+
+  interface cld_ntrp_get_cell_values
+    module procedure cld_ntrp_get_cell_values
+  end interface cld_ntrp_get_cell_values
+
+  interface cld_ntrp_get_cell_values_2D
+    module procedure cld_ntrp_get_cell_values_2D
+  end interface cld_ntrp_get_cell_values_2D
+
   public :: cld_ntrp_linear_cell_interp, cld_ntrp_locate_cell, cld_ntrp_get_cell_values
+  public :: cld_ntrp_get_cell_values_2D
 #ifdef _TEST_CLOUD_INTERPOLATOR
   public :: cld_ntrp_expand_index, cld_ntrp_contract_indices
 #endif
@@ -19,7 +43,7 @@ real, parameter           :: tol = 10*epsilon(1.)
 CONTAINS
 
 !...............................................................................
-  _PURE subroutine cld_ntrp_expand_index(Ic, ie, ier)
+   PURE subroutine cld_ntrp_expand_index(Ic, ie, ier)
     integer, intent(in)  ::  Ic    ! contacted index
     integer, intent(out) ::  ie(:) ! expanded list of indices
     integer, intent(out) ::  ier   ! error flag (0=ok)
@@ -43,7 +67,7 @@ CONTAINS
 
 !...............................................................................
 !...............................................................................
-  _PURE subroutine cld_ntrp_contract_indices(ie, Ic, ier)
+   subroutine cld_ntrp_contract_indices(ie, Ic, ier)
     integer, intent(in) ::  ie(:)  ! expanded list of indices
     integer, intent(out)  ::  Ic   ! contacted index
     integer, intent(out) ::  ier   ! error flag (0=ok)
@@ -66,7 +90,7 @@ CONTAINS
   
 !...............................................................................
 !...............................................................................
-  _PURE subroutine cld_ntrp_linear_cell_interp(fvals, ts, f, ier)
+   subroutine cld_ntrp_linear_cell_interp(fvals, ts, f, ier)
     real, intent(in) :: fvals(0:)  ! values at the cell nodes
     real, intent(in) :: ts(:)      ! normalized [0,1]^nd cell coordinates
     real, intent(out):: f          ! interpolated value
@@ -75,29 +99,51 @@ CONTAINS
     integer j, nd, Ic, iflag
     integer ie(size(fvals))
     real    basis
+!kk
+    integer, save, dimension(2,0:3)    :: ie2
+    logical,save                       :: lfirst = .true.
 
-    ier = 0
+    nd  = size(ts)
     f   = 0
-    nd   = size(ts)
-    if(size(fvals) /= 2**nd) then
-       ier = 1
-       return
-    endif
-    
-    do Ic = 0, 2**nd - 1
-       basis = 1
-       call cld_ntrp_expand_index(Ic, ie, iflag)
-       do j = 1, nd
-          basis = basis * (  (1-ie(j))*(1.0-ts(j)) + ie(j)*ts(j) )
+    if(size(fvals) == 4 .and. nd == 2) then                   !special case 2D
+       if(lfirst)   then
+          do Ic = 0, 3
+             call cld_ntrp_expand_index(Ic, ie2(:,Ic),iflag)
+          end do
+          lfirst = .FALSE.
+       end if
+       do Ic = 0, 3
+!          basis = 1
+!kk          write(stdlog(),*) 'new ',Ic,nd,' ; ',ie2(1:4,Ic)
+!          do j = 1, 2
+!             basis = basis * (  (1-ie2(j,Ic))*(1.0-ts(j)) + ie2(j,Ic)*ts(j) )
+!          end do
+          basis =         (  (1-ie2(1,Ic))*(1.0-ts(1)) + ie2(1,Ic)*ts(1) )
+          basis = basis * (  (1-ie2(2,Ic))*(1.0-ts(2)) + ie2(2,Ic)*ts(2) )
+          f = f + fvals(Ic)*basis
        end do
-       f = f + fvals(Ic)*basis
-    end do
+    else
+       ier = 0
+       if(size(fvals) /= 2**nd) then
+          ier = 1
+          return
+       endif
+    
+       do Ic = 0, 2**nd - 1
+          basis = 1
+          call cld_ntrp_expand_index(Ic, ie, iflag)
+          do j = 1, nd
+             basis = basis * (  (1-ie(j))*(1.0-ts(j)) + ie(j)*ts(j) )
+          end do
+          f = f + fvals(Ic)*basis
+       end do
+    end if
     
   end subroutine cld_ntrp_linear_cell_interp
 
 !...............................................................................
 !...............................................................................
-  _PURE subroutine cld_ntrp_locate_cell(axis, x, index, ier)
+    subroutine cld_ntrp_locate_cell(axis, x, index, ier)
     real, intent(in)     :: axis(:) ! axis 
     real, intent(in)     :: x       ! abscissae
     integer, intent(out) :: index   ! lower-left corner index
@@ -106,6 +152,7 @@ CONTAINS
     logical down
     integer n, index1, is
     real axis_1, axis_n, axis_min, axis_max
+    
     ier   = 0
     index = -1
     down = .FALSE.
@@ -114,7 +161,7 @@ CONTAINS
        ier = 3
        return
     endif
-    axis_1 = axis(1)
+    axis_1 = 2*axis(2)-axis(3)
     axis_n = axis(n)
     axis_min = axis_1
     axis_max = axis_n
@@ -184,7 +231,7 @@ CONTAINS
 
 !...............................................................................
 !...............................................................................
-  _PURE subroutine cld_ntrp_get_flat_index(nsizes, indices, flat_index, ier)
+   subroutine cld_ntrp_get_flat_index(nsizes, indices, flat_index, ier)
     integer, intent(in)  :: nsizes(:)  ! size of array along each axis
     integer, intent(in)  :: indices(:) ! cell indices
     integer, intent(out) :: flat_index ! index into flattened array
@@ -206,12 +253,12 @@ CONTAINS
        flat_index = flat_index*nsizes(id) + indices(id)-1
     enddo
     flat_index = flat_index + 1    
-    
+
   end subroutine cld_ntrp_get_flat_index
 
 !...............................................................................
 !...............................................................................
-  _PURE subroutine cld_ntrp_get_cell_values(nsizes, fnodes, indices, fvals, ier)
+   subroutine cld_ntrp_get_cell_values(nsizes, fnodes, indices, fvals, ier)
     integer, intent(in)  :: nsizes(:)  ! size of fnodes along each axis
     real, intent(in)     :: fnodes(:)  ! flattened array of node values
     integer, intent(in)  :: indices(:) ! cell indices
@@ -220,38 +267,93 @@ CONTAINS
 
     integer id, nt, nd, flat_index, Ic, iflag
     integer, dimension(size(nsizes)) :: cell_indices, node_indices
+!kk
+    integer, save, dimension(2,0:3)    :: cell_indices2
+    logical,save                       :: lfirst = .true.
+
     ier = 0
     fvals = 0
 
     nd = size(nsizes)
-    if(nd /= size(indices)) then
-       ! size mismatch
-       ier = 1
-       return
-    endif
-    if(2**nd > size(fvals)) then
-       ! not enough elements to hold result
-       ier = 2
-       return
-    endif
-    nt = 1
-    do id = 1, nd
-       nt = nt * nsizes(id)
-    enddo
-    if(nt /= size(fnodes)) then
-       ! not enough node values
-       ier = 3
-       return
-    endif
+    if(nd == 2)  then
+       if(lfirst)   then
+          do Ic = 0, 3
+             call cld_ntrp_expand_index(Ic, cell_indices2(:,Ic),iflag)
+          end do
+          lfirst = .FALSE.
+       end if
 
-    do Ic = 0, 2**nd-1
-       call cld_ntrp_expand_index(Ic, cell_indices, iflag)
-       node_indices = indices + cell_indices
-       call cld_ntrp_get_flat_index(nsizes, node_indices, flat_index, iflag)
-       fvals(Ic) = fnodes(flat_index)
-    enddo
+       do Ic = 0, 3
+          node_indices = indices + cell_indices2(:,Ic)
+          flat_index =   (node_indices(2)-1)*nsizes(1) + node_indices(1)
+          fvals(Ic) = fnodes(flat_index)
+       enddo
+    else
+
+       if(nd /= size(indices)) then
+          ! size mismatch
+          ier = 1
+          return
+       endif
+       if(2**nd > size(fvals)) then
+          ! not enough elements to hold result
+          ier = 2
+          return
+       endif
+       nt = 1
+       do id = 1, nd
+          nt = nt * nsizes(id)
+       enddo
+       if(nt /= size(fnodes)) then
+          ! not enough node values
+          ier = 3
+          return
+       endif
+
+       do Ic = 0, 2**nd-1
+          call cld_ntrp_expand_index(Ic, cell_indices, iflag)
+          node_indices = indices + cell_indices
+          call cld_ntrp_get_flat_index(nsizes, node_indices, flat_index, iflag)
+          fvals(Ic) = fnodes(flat_index)
+       enddo
+
+    end if
+!kk    write(stdlog(),*) 'cld_ntrp_get_cell_values ',nd
     
   end subroutine cld_ntrp_get_cell_values
+
+  subroutine cld_ntrp_get_cell_values_2D(nsizes, fnodes, indices, fvals, ier)
+    integer, intent(in)  :: nsizes(:)  ! size of fnodes along each axis
+    real,dimension(nsizes(1),nsizes(2))  :: fnodes     ! flattened array of node values
+    integer, intent(in)  :: indices(:) ! cell indices
+    real, intent(out)    :: fvals(0:)  ! returned array values in the cell
+    integer, intent(out) ::  ier       ! error flag (0=ok)
+
+    integer id, nt, nd, flat_index, Ic, iflag
+    integer, dimension(size(nsizes)) :: cell_indices, node_indices
+!kk
+    integer, save, dimension(2,0:3)    :: cell_indices2
+    logical,save                       :: lfirst = .true.
+
+    ier = 0
+    fvals = 0
+
+    nd = size(nsizes)
+    if (lfirst) then
+       do Ic = 0, 3
+          call cld_ntrp_expand_index(Ic, cell_indices2(:,Ic),iflag)
+       end do
+       lfirst = .FALSE.
+    end if
+
+    do Ic = 0, 3
+       node_indices = indices + cell_indices2(:,Ic)
+       flat_index =   (node_indices(2)-1)*nsizes(1) + node_indices(1)
+       fvals(Ic) = fnodes(node_indices(1),node_indices(2))
+    enddo
+
+  end subroutine cld_ntrp_get_cell_values_2D
+
 
 end MODULE cloud_interpolator_mod
 !===============================================================================

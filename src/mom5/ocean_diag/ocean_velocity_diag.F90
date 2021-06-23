@@ -968,7 +968,7 @@ subroutine velocity_change(Time, Velocity, velocity_change_max, velocity_change_
   call write_timestamp(Time%model_time)
   write (stdoutunit,'(//60x,a/)')    &
    ' Velocity change summary (test for leap-frog noise):'
-  write (stdoutunit,'(1x,a,e12.6/)') &
+  write (stdoutunit,'(1x,a,e13.6/)') &
    'Locations (if any) where abs(0.5*(u(taup1)+u(taum1))-u(tau)) (m/s) > ',velocity_change_max
   num = 0
   if(horz_grid == MOM_BGRID) then 

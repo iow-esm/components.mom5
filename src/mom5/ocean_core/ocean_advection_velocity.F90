@@ -80,7 +80,7 @@ module ocean_advection_velocity_mod
 !
 !  <DATA NAME="read_advection_velocity" TYPE="logical">
 !  For reading in a file with specified zonal, meridional,
-!  and vertical components to the advective velocity.
+!  and vertical components to the advection velocity.
 !  The file should have velocity at the east face of T-cell,
 !  north face, and bottom, just as on a C-grid.  The units 
 !  should be m/s for each component.  MOM then multiplies

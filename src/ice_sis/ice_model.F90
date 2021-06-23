@@ -27,6 +27,8 @@
 ! manages fluxes, diagnostics, and ice timesteps; sea ice dynamics and         !
 ! thermodynamics are performed in ice_[dyn|thm].f90 - Mike Winton (Michael.Winton)!
 !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~!
+! IOW 1                                                                        !
+!~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~!
 module ice_model_mod
 
   use mpp_mod,          only: mpp_clock_begin, mpp_clock_end
@@ -886,16 +888,19 @@ contains
        Ice%albedo_nir_dir(:,:,1) = Ice%albedo(:,:,1)
        Ice%albedo_vis_dif(:,:,1) = Ice%albedo(:,:,1)
        Ice%albedo_nir_dif(:,:,1) = Ice%albedo(:,:,1)
+       Ice%coszen(:,:)           = coszen(:,:,1)
     elseif (do_sun_angle_for_alb) then
       call diurnal_solar(geo_lat*rad, geo_lon*rad, Ice%time, cosz=cosz_alb,	&
 			     fracday=diurnal_factor, rrsun=rrsun_dt_ice, dt_time=Dt_ice)  !diurnal_factor as dummy
       call compute_ocean_albedo (Ice%mask, cosz_alb(:,:), Ice%albedo_vis_dir(:,:,1),&
                                    Ice%albedo_vis_dif(:,:,1), Ice%albedo_nir_dir(:,:,1),&
                                    Ice%albedo_nir_dif(:,:,1), latitude )
+      Ice%coszen(:,:)           = cosz_alb(:,:)
     else
       call compute_ocean_albedo (Ice%mask, coszen(:,:,1), Ice%albedo_vis_dir(:,:,1),&
                                  Ice%albedo_vis_dif(:,:,1), Ice%albedo_nir_dir(:,:,1),&
                                  Ice%albedo_nir_dif(:,:,1), latitude )
+      Ice%coszen(:,:)           = coszen(:,:,1)
     endif
 
     if (id_alb_vis_dir>0) sent = send_data(id_alb_vis_dir, all_avg(Ice%albedo_vis_dir,Ice%part_size(isc:iec,jsc:jec,:)), &

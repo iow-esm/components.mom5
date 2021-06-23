@@ -564,8 +564,7 @@ module ocean_types_mod
      real, dimension(isd:ied,jsd:jed)        :: current_wave_stress !wave-current bottom stress for sediment dynamics (N/m^2)
      real, dimension(isd:ied,jsd:jed)        :: rossby_radius   ! first baroclinic rossby radius (m)
      real, dimension(isd:ied,jsd:jed)        :: stokes_depth    ! depth scale (m) used for exponential decay of surface wave Stokes velocity
-     real, dimension(isd:ied,jsd:jed,nk,2)   :: stokes_drift    ! Stokes drift velocity (m/s) from surface wave model 
-     real, dimension(isd:ied,jsd:jed,nk,2)   :: stokes_force    ! Coriolis force from Stokes drift (N/m^2)
+     real, dimension(isd:ied,jsd:jed,0:nk,2) :: stokes_drift    ! Stokes drift velocity (m/s) from surface wave model 
      real, dimension(isd:ied,jsd:jed,nk,2)   :: press_force     ! thickness*density weighted (i,j)-directed press force (N/m^2)
      real, dimension(isd:ied,jsd:jed,nk,2)   :: accel           ! thickness*density weighted (i,j)-directed acceleration (N/m^2)
      real, dimension(isd:ied,jsd:jed,nk,2)   :: vfrict_impl     ! thickness*density weighted vertical friction (N/m^2)
@@ -1211,6 +1210,7 @@ module ocean_types_mod
      real, pointer, dimension(:,:) :: calving_hflx    =>NULL() ! heat flux, relative to 0C, of frozen land water into ocean (W/m2) 
      real, pointer, dimension(:,:) :: p               =>NULL() ! pressure of overlying sea ice and atmosphere (Pa)
      real, pointer, dimension(:,:) :: mi              =>NULL() ! mass of overlying sea ice 
+     real, pointer, dimension(:,:) :: coszen          =>NULL() ! cosine of solar zenith angle (1)
      real, pointer, dimension(:,:) :: langmuirfactor  =>NULL() ! langmuir turbulence boost factor (non-dimensional)
      real, pointer, dimension(:,:) :: ustoke          =>NULL() ! x-dir surface stokes drift
      real, pointer, dimension(:,:) :: vstoke          =>NULL() ! y-dir surface stokes drift

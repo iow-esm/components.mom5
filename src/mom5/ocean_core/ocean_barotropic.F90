@@ -1633,16 +1633,16 @@ subroutine ocean_barotropic_init(Grid, Domain, Time, Time_steps, Ocean_options, 
         ' Barotropic stability most nearly violated at T-cell (i,j) = (',&
         icg+Dom%ioff,',',jcg+Dom%joff,'), (lon,lat) = (',Grd%xt(icg,jcg),',',Grd%yt(icg,jcg),').'
         write(unit,'(a,i6)')    '         The number of kmt-levels at this point is ',Grd%kmt(icg,jcg) 
-        write(unit,'(a,e12.6)') '         The dxt grid spacing (m) at this point is ',Grd%dxt(icg,jcg) 
-        write(unit,'(a,e12.6)') '         The dyt grid spacing (m) at this point is ',Grd%dyt(icg,jcg)
+        write(unit,'(a,e13.6)') '         The dxt grid spacing (m) at this point is ',Grd%dxt(icg,jcg) 
+        write(unit,'(a,e13.6)') '         The dyt grid spacing (m) at this point is ',Grd%dyt(icg,jcg)
         cfl_error=.false.
       else
         write (unit,'(/a,i4,a,i4,a,f9.2,a,f9.2,a)')                   &
         '==>Error: Barotropic stability violated at T-cell (i,j) = (',&
         icg+Dom%ioff,',',jcg+Dom%joff,'), (lon,lat) = (',Grd%xt(icg,jcg),',',Grd%yt(icg,jcg),').'
         write(unit,'(a,i6)')    '         The number of kmt-levels at this point is ',Grd%kmt(icg,jcg) 
-        write(unit,'(a,e12.6)') '         The dxt grid spacing (m) at this point is ',Grd%dxt(icg,jcg) 
-        write(unit,'(a,e12.6)') '         The dyt grid spacing (m) at this point is ',Grd%dyt(icg,jcg) 
+        write(unit,'(a,e13.6)') '         The dxt grid spacing (m) at this point is ',Grd%dxt(icg,jcg) 
+        write(unit,'(a,e13.6)') '         The dyt grid spacing (m) at this point is ',Grd%dyt(icg,jcg) 
         cfl_error=.true.  
       endif
 

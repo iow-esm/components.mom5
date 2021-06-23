@@ -87,12 +87,16 @@
        write(this_pe,'(a,i6.6,a)') '.',pe,'.out'
        inquire( file=trim(configfile)//this_pe, opened=opened )
        if( opened )then
-          call FLUSH(log_unit)
+!kk          call FLUSH(log_unit)
+          call FLUSH(log_unit)    ! kk rueckgaengig
        else
           log_unit=get_unit()
           open( unit=log_unit, status='UNKNOWN', file=trim(configfile)//this_pe, position='APPEND', err=10 )
        end if
-       stdlog = log_unit
+!kk       stdlog = log_unit
+          stdlog = log_unit       ! kk rueckgaengig
+! kk rueckgaengig       stdlog = 0
+! kk rueckgaengig       call flush(0)
     else
        inquire( unit=etc_unit, opened=opened )
        if( opened )then

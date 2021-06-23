@@ -219,6 +219,7 @@ public  :: iceClocka,iceClockb,iceClockc
      real,    pointer, dimension(:,:  ) :: flux_sw_vis_dif     =>NULL()
      real,    pointer, dimension(:,:  ) :: flux_sw_nir_dir     =>NULL()
      real,    pointer, dimension(:,:  ) :: flux_sw_nir_dif     =>NULL()
+     real,    pointer, dimension(:,:  ) :: coszen              =>NULL() ! cosine of solar zenith angle
      real,    pointer, dimension(:,:  ) :: flux_lh             =>NULL()
      real,    pointer, dimension(:,:  ) :: lprec               =>NULL()
      real,    pointer, dimension(:,:  ) :: fprec               =>NULL()
@@ -451,6 +452,7 @@ public  :: iceClocka,iceClockb,iceClockc
          Ice % flux_sw_vis_dif (isc:iec, jsc:jec) ,        &
          Ice % flux_sw_nir_dir (isc:iec, jsc:jec) ,        &
          Ice % flux_sw_nir_dif (isc:iec, jsc:jec) ,        &
+	 Ice % coszen          (isc:iec, jsc:jec) ,        &
          Ice % flux_lw         (isc:iec, jsc:jec ) ,       &
          Ice % flux_lh         (isc:iec, jsc:jec ) ,       &
          Ice % lprec           (isc:iec, jsc:jec ) ,       &
@@ -479,6 +481,7 @@ public  :: iceClocka,iceClockb,iceClockc
     Ice % flux_sw_vis_dif =0.
     Ice % flux_sw_nir_dir =0.
     Ice % flux_sw_nir_dif =0.
+    Ice % coszen          =0.
     Ice % flux_lh         =0. 
     Ice % lwdn            =0.
     Ice % swdn            =0.
@@ -684,6 +687,7 @@ public  :: iceClocka,iceClockb,iceClockc
        Ice % flux_sw_vis_dif   = 0.0 
        Ice % flux_sw_nir_dir   = 0.0 
        Ice % flux_sw_nir_dif   = 0.0 
+       Ice % coszen            = 0.0 
        do_init = .true. ! done in ice_model
     end if
 
@@ -779,6 +783,7 @@ public  :: iceClocka,iceClockb,iceClockc
     deallocate(Ice % qflx_lim_ice, Ice % qflx_res_ice )
     deallocate(Ice % flux_sw_vis_dir, Ice % flux_sw_vis_dif )
     deallocate(Ice % flux_sw_nir_dir, Ice % flux_sw_nir_dif )
+    deallocate(Ice % coszen)
 
     ! End icebergs
     if (do_icebergs) call icebergs_end(Ice%icebergs)

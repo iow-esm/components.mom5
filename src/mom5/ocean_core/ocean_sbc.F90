@@ -461,6 +461,7 @@ use ocean_types_mod,          only: ocean_prog_tracer_type, ocean_diag_tracer_ty
 use ocean_types_mod,          only: ocean_external_mode_type, ocean_velocity_type 
 use ocean_types_mod,          only: ice_ocean_boundary_type, ocean_density_type
 use ocean_types_mod,          only: ocean_public_type
+use wave_types_mod,           only: ocean_wave_type
 use ocean_workspace_mod,      only: wrk1_2d, wrk2_2d, wrk3_2d, wrk1
 use ocean_util_mod,           only: diagnose_2d, diagnose_2d_u, diagnose_3d_u, diagnose_sum
 use ocean_tracer_util_mod,    only: diagnose_3d_rho
@@ -540,6 +541,8 @@ integer :: id_latent_heat_fusion=-1
 
 integer :: id_ustokes      =-1
 integer :: id_vstokes      =-1
+integer :: id_ustokesrf    =-1
+integer :: id_vstokesrf    =-1
 integer :: id_stokes_depth =-1
 
 integer :: id_ustoke          =-1
@@ -561,6 +564,7 @@ integer :: id_ekman_we       =-1
 integer :: id_ekman_heat     =-1
 integer :: id_swflx          =-1
 integer :: id_swflx_vis      =-1
+integer :: id_coszen         =-1
 
 integer :: id_lw_heat            =-1
 integer :: id_sens_heat          =-1
@@ -891,6 +895,11 @@ subroutine ocean_sbc_init(Grid, Domain, Time, T_prog, T_diag, &
   write (stdoutunit,'(/)')
   write (stdoutunit, ocean_sbc_nml)  
   write (stdlogunit, ocean_sbc_nml)
+
+! iow !
+  if(read_stokes_drift) then
+      write (stdoutunit,*) '--> Note: read_stokes_drift=.true. in ocean_sbc_nml needs calc_stokes_drift=.true. in ocean_wave_nml'
+  endif
 
   if(do_bitwise_exact_sum) then
      global_sum_flag = BITWISE_EXACT_SUM
@@ -1578,7 +1587,13 @@ subroutine ocean_sbc_diag_init(Time, Dens, T_prog)
        'Watts', missing_value=missing_value,range=(/-1.e4,1.e4/))           
 
   id_stokes_depth = register_diag_field ('ocean_model', 'stokes_depth', Grd%vel_axes_uv(1:2), Time%model_time, &
-     'Decady depth for Stokes drift from surface waves', 'metre', missing_value=missing_value, range=(/-10.0,1e6/))
+     'Decay depth for Stokes drift from surface waves', 'm', missing_value=missing_value, range=(/-10.0,1e6/))
+
+  id_ustokesrf = register_diag_field ('ocean_model', 'ustokesrf', Grd%vel_axes_uv(1:2), Time%model_time, &
+     'i-Stokes surface drift from waves', 'm/sec', missing_value=missing_value, range=(/-1e3,1e3/))
+
+  id_vstokesrf = register_diag_field ('ocean_model', 'vstokesrf', Grd%vel_axes_uv(1:2), Time%model_time, &
+     'j-Stokes surface drift from waves', 'm/sec', missing_value=missing_value, range=(/-1e3,1e3/))
 
   id_ustokes = register_diag_field ('ocean_model', 'ustokes', Grd%vel_axes_uv(1:3), Time%model_time, &
      'i-Stokes drift from surface waves', 'm/sec', missing_value=missing_value, range=(/-1e3,1e3/))
@@ -1680,6 +1695,10 @@ subroutine ocean_sbc_diag_init(Time, Dens, T_prog)
 
   id_swflx_vis = register_diag_field('ocean_model','swflx_vis', Grd%tracer_axes(1:2),&
        Time%model_time, 'visible shortwave into ocean (>0 heats ocean)', 'W/m^2' ,   &
+       missing_value=missing_value,range=(/-1.e10,1.e10/))   
+
+  id_coszen = register_diag_field('ocean_model','coszen', Grd%tracer_axes(1:2),&
+       Time%model_time, 'cosine of the solar zenith angle', 'none' ,   &
        missing_value=missing_value,range=(/-1.e10,1.e10/))   
 
   id_evap_heat = register_diag_field('ocean_model','evap_heat', Grd%tracer_axes(1:2),&
@@ -2857,13 +2876,14 @@ end subroutine ocean_sfc_end
 !
 ! </DESCRIPTION>
 !
-subroutine get_ocean_sbc(Time, Ice_ocean_boundary, Thickness, Dens, Ext_mode, T_prog, Velocity, &
-                         pme, melt, river, runoff, calving, upme, uriver, swflx, swflx_vis, patm)
+subroutine get_ocean_sbc(Time, Ice_ocean_boundary, Thickness, Dens, Waves, Ext_mode, T_prog, Velocity, &
+                         pme, melt, river, runoff, calving, upme, uriver, swflx, swflx_vis, patm, coszen)
 
   type(ocean_time_type),          intent(in)    :: Time 
   type(ice_ocean_boundary_type),  intent(in)    :: Ice_ocean_boundary
   type(ocean_thickness_type),     intent(in)    :: Thickness
   type(ocean_density_type),       intent(in)    :: Dens
+  type(ocean_wave_type),          intent(in)    :: Waves
   type(ocean_external_mode_type), intent(inout) :: Ext_mode
   type(ocean_prog_tracer_type),   intent(inout) :: T_prog(:)
   type(ocean_velocity_type),      intent(inout) :: Velocity
@@ -2875,6 +2895,7 @@ subroutine get_ocean_sbc(Time, Ice_ocean_boundary, Thickness, Dens, Ext_mode, T_
   real, dimension(isd:,jsd:),     intent(inout) :: swflx
   real, dimension(isd:,jsd:),     intent(inout) :: swflx_vis
   real, dimension(isd:,jsd:),     intent(inout) :: patm
+  real, dimension(isd:,jsd:),     intent(inout) :: coszen
   real, dimension(isd:,jsd:,:),   intent(inout) :: upme
   real, dimension(isd:,jsd:,:),   intent(inout) :: uriver
 
@@ -3043,20 +3064,34 @@ subroutine get_ocean_sbc(Time, Ice_ocean_boundary, Thickness, Dens, Ext_mode, T_
 !            Velocity%stokes_drift(ii,jj,1,1) = Ice_ocean_boundary%ustokes(i,j)*Grd%umask(ii,jj,1)
 !            Velocity%stokes_drift(ii,jj,2,1) = Ice_ocean_boundary%vstokes(i,j)*Grd%umask(ii,jj,1)
 !            Velocity%stokes_depth(ii,jj)     = Ice_ocean_boundary%stokes_depth(i,j)*Grd%umask(ii,jj,1)
+! regrid Stokes drift from t-grid onto u-grid by averaging active neigbors (assuming shift=0)
+            tmp_x = Grd%umask(ii,jj,1)/(Grd%tmask(i,j,1)+Grd%tmask(i+1,j,1)+Grd%tmask(i,j+1,1)+Grd%tmask(i+1,j+1,1)+epsln)
+            Velocity%stokes_drift(ii,jj,0,1) = &
+                ( Grd%tmask(i,j,1)  *Waves%xstokes(i,j)   + Grd%tmask(i+1,j,1)  *Waves%xstokes(i+1,j) &
+              +   Grd%tmask(i,j+1,1)*Waves%xstokes(i,j+1) + Grd%tmask(i+1,j+1,1)*Waves%xstokes(i+1,j+1) )*tmp_x
+            Velocity%stokes_drift(ii,jj,0,2) = &
+                ( Grd%tmask(i,j,1)  *Waves%ystokes(i,j)   + Grd%tmask(i+1,j,1)  *Waves%ystokes(i+1,j) &
+              +   Grd%tmask(i,j+1,1)*Waves%ystokes(i,j+1) + Grd%tmask(i+1,j+1,1)*Waves%ystokes(i+1,j+1) )*tmp_x 
+            tmp_y = & 
+                ( Grd%tmask(i,j,1)  *Waves%wave_k(i,j)   + Grd%tmask(i+1,j,1)  *Waves%wave_k(i+1,j) &
+              +   Grd%tmask(i,j+1,1)*Waves%wave_k(i,j+1) + Grd%tmask(i+1,j+1,1)*Waves%wave_k(i+1,j+1) )*tmp_x
+            Velocity%stokes_depth(ii,jj) = 0.5*Grd%umask(ii,jj,1)/(tmp_y+epsln)
          enddo
       enddo
-      do k=1,nk
-          do j=jsc,jec
-              do i=isc,iec
-                  stokes_factor = -Grd%umask(i,j,k)*Thickness%depth_zu(i,j,k)/(epsln+Velocity%stokes_depth(i,j))
-                  Velocity%stokes_drift(i,j,k,1) = Velocity%stokes_drift(i,j,1,1)*exp(stokes_factor)    
-                  Velocity%stokes_drift(i,j,k,2) = Velocity%stokes_drift(i,j,1,2)*exp(stokes_factor)    
-              enddo
-          enddo
+      do k = 1,nk
+        do j = jsc_bnd,jec_bnd
+           do i = isc_bnd,iec_bnd
+              ii = i + i_shift
+              jj = j + j_shift
+              stokes_factor = exp(-Grd%umask(i,j,k)*Thickness%depth_zu(i,j,k)/(Velocity%stokes_depth(ii,jj)+epsln))*Grd%umask(ii,jj,k)
+              Velocity%stokes_drift(ii,jj,k,1) = Velocity%stokes_drift(ii,jj,0,1)*stokes_factor   
+              Velocity%stokes_drift(ii,jj,k,2) = Velocity%stokes_drift(ii,jj,0,2)*stokes_factor    
+           enddo
+        enddo
       enddo
-  endif 
-
-
+! update is needed for use of Velocity%stokes_drift over data domain of 2D drifters
+    call mpp_update_domains(Velocity%stokes_drift(:,:,:,1),Velocity%stokes_drift(:,:,:,2),Dom%domain2d)
+  endif
   !--------water and salt fluxes--------------------------------- 
   !
   ! Set temperature for water in evaporation and precipitation equal to the 
@@ -3557,6 +3592,13 @@ subroutine get_ocean_sbc(Time, Ice_ocean_boundary, Thickness, Dens, Ext_mode, T_
          enddo
       enddo
   endif
+  do j = jsc_bnd, jec_bnd
+     do i = isc_bnd, iec_bnd
+        ii = i + i_shift
+        jj = j + j_shift  
+        coszen(ii,jj) = Ice_ocean_boundary%coszen(i,j)*Grd%tmask(ii,jj,1)
+     enddo
+  enddo
 
 
   ! over-ride the boundary heat fluxes with a constant value. 
@@ -3698,7 +3740,7 @@ subroutine get_ocean_sbc(Time, Ice_ocean_boundary, Thickness, Dens, Ext_mode, T_
   !
   call ocean_sbc_diag (Time, Velocity, Thickness, Dens, T_prog, Ice_ocean_boundary,   &
                       pme, runoff, calving, river, melt, liquid_precip, frozen_precip,&
-                      evaporation, sensible, longwave, latent, swflx, swflx_vis)
+                      evaporation, sensible, longwave, latent, swflx, swflx_vis, coszen)
 
 
 end subroutine get_ocean_sbc
@@ -3748,7 +3790,7 @@ subroutine flux_adjust(Time, T_diag, Dens, Ext_mode, T_prog, Velocity, river, me
   real                             :: pme_restore_total, flx_restore_total 
   real                             :: pme_correct_total, flx_correct_total 
   real                             :: tmp_delta_salinity 
-  integer                          :: i, j, k, n, tau, taum1
+  integer                          :: i, j, k, tau, taum1
   logical                          :: used
   
   tau      = Time%tau
@@ -4203,17 +4245,8 @@ subroutine flux_adjust(Time, T_diag, Dens, Ext_mode, T_prog, Velocity, river, me
      enddo
   endif
 
-  ! mpp update domain is needed for vertical mixing schemes such
-  ! as KPP and GOTM, as well as to get c-grid version of smf.
   if(id_tau_x_correction > 0 .or. id_tau_y_correction > 0) then 
      call mpp_update_domains(tau_x_correction(:,:),tau_y_correction(:,:),Dom%domain2d,gridtype=BGRID_NE)
-
-     do j=jsd,jed
-        do i=isd,ied
-           Velocity%smf_bgrid(i,j,1) = Velocity%smf_bgrid(i,j,1) + tau_x_correction(i,j)
-           Velocity%smf_bgrid(i,j,2) = Velocity%smf_bgrid(i,j,2) + tau_y_correction(i,j)
-        enddo
-     enddo
 
      ! c-grid version of correction 
      do j=jsc,jec
@@ -4238,26 +4271,8 @@ subroutine flux_adjust(Time, T_diag, Dens, Ext_mode, T_prog, Velocity, river, me
         enddo
      enddo
 
-     ! for use in forcing momentum
-     if(horz_grid == MOM_BGRID) then
-        do n=1,2
-           do j=jsd,jed
-              do i=isd,ied
-                 Velocity%smf(i,j,n) = Velocity%smf_bgrid(i,j,n)
-              enddo
-           enddo
-        enddo
-     else
-        do n=1,2
-           do j=jsc,jec
-              do i=isc,iec
-                 Velocity%smf(i,j,n) = Velocity%smf_cgrid(i,j,n)
-              enddo
-           enddo
-        enddo
-     endif
+  endif 
 
-  endif
 
   if(horz_grid == MOM_BGRID) then 
 
@@ -4360,7 +4375,7 @@ end subroutine flux_adjust
 !
 subroutine ocean_sbc_diag(Time, Velocity, Thickness, Dens, T_prog, Ice_ocean_boundary, &
                       pme, runoff, calving, river, melt, liquid_precip, frozen_precip, &
-                      evaporation, sensible, longwave, latent, swflx, swflx_vis)
+                      evaporation, sensible, longwave, latent, swflx, swflx_vis, coszen)
 
   type(ocean_time_type),          intent(in) :: Time 
   type(ocean_velocity_type),      intent(in) :: Velocity
@@ -4381,6 +4396,7 @@ subroutine ocean_sbc_diag(Time, Velocity, Thickness, Dens, T_prog, Ice_ocean_bou
   real, dimension(isd:,jsd:),     intent(in) :: latent
   real, dimension(isd:,jsd:),     intent(in) :: swflx
   real, dimension(isd:,jsd:),     intent(in) :: swflx_vis
+  real, dimension(isd:,jsd:),     intent(in) :: coszen
 
   real, dimension(isd:ied,jsd:jed) :: tmp_flux
 
@@ -4511,9 +4527,11 @@ subroutine ocean_sbc_diag(Time, Velocity, Thickness, Dens, T_prog, Ice_ocean_bou
 
 
   !--------stokes drift velocity and decay depth----------------------
-  call diagnose_3d_u(Time, Grd, id_ustokes, Velocity%stokes_drift(:,:,:,1))
-  call diagnose_3d_u(Time, Grd, id_vstokes, Velocity%stokes_drift(:,:,:,2))
+  call diagnose_3d_u(Time, Grd, id_ustokes, Velocity%stokes_drift(:,:,1:,1)) ! iow ! k=1:kmax
+  call diagnose_3d_u(Time, Grd, id_vstokes, Velocity%stokes_drift(:,:,1:,2)) ! iow ! k=1:kmax
   call diagnose_2d_u(Time, Grd, id_stokes_depth, Velocity%stokes_depth(:,:))
+  call diagnose_2d_u(Time, Grd, id_ustokesrf, Velocity%stokes_drift(:,:,0,1)) ! iow ! surface only
+  call diagnose_2d_u(Time, Grd, id_vstokesrf, Velocity%stokes_drift(:,:,0,2)) ! iow ! surface only
 
 
   !--------runoff/calving/river related diagnostics----------------------
@@ -4763,6 +4781,9 @@ subroutine ocean_sbc_diag(Time, Velocity, Thickness, Dens, T_prog, Ice_ocean_bou
   call diagnose_2d(Time, Grd, id_swflx_vis, swflx_vis(:,:))
   ! total visible shortwave (Watts)
   call diagnose_sum(Time, Grd, Dom, id_total_ocean_swflx_vis, swflx_vis, 1e-15)
+
+  ! cosine of sun's zenith angle
+  call diagnose_2d(Time, Grd, id_coszen, coszen(:,:))
 
 
   ! evaporative heat flux (W/m2) (<0 cools ocean)

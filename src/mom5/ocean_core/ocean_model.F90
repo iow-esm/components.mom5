@@ -6,6 +6,15 @@ module ocean_model_mod
 !<CONTACT EMAIL="GFDL.Climate.Model.Info@noaa.gov"> Matt Harrison
 !</CONTACT>
 !
+!<CONTACT EMAIL="torsten.seifert@io-warnemuende.de"> Torsten Seifert 
+!</CONTACT>
+!<CONTACT EMAIL="klaus-ketelsen@t-online.de"> Klaus Ketelsen 
+!</CONTACT>
+!<DESCRIPTION>
+!  IOW version 3.0 from 2014/11/28
+!  code changes: call update_ocean_drifters with Domain
+!</DESCRIPTION>
+!
 !<OVERVIEW>
 ! Time step the ocean model using either a twolevel staggered scheme
 ! (the default) or threelevel leap-frog scheme (the older approach).
@@ -374,6 +383,7 @@ private
   real, dimension(isd:ied,jsd:jed)      :: bott_blthick  ! bottom boundary layer depth from sigma transport (m)
   real, dimension(isd:ied,jsd:jed)      :: rossby_radius ! rossby radius (m)
   real, dimension(isd:ied,jsd:jed,nk)   :: swheat        ! external shortwave heating source W/m^2
+  real, dimension(isd:ied,jsd:jed)      :: coszen        ! cosine of solar zenith angle
 
 #else
 
@@ -400,6 +410,7 @@ private
   real, pointer, dimension(:,:)     :: bott_blthick        =>NULL() ! bottom boundary layer depth from sigma transport (m)
   real, pointer, dimension(:,:)     :: rossby_radius       =>NULL() ! rossby radius (m) 
   real, pointer, dimension(:,:,:)   :: swheat              =>NULL() ! external shortwave heating source W/m^2
+  real, pointer, dimension(:,:)     :: coszen              =>NULL() ! cosine of solar zenith angle
 
 #endif
 
@@ -456,7 +467,7 @@ private
   character(len=32) :: horizontal_grid='bgrid'  
   integer :: horz_grid=1
 
-  character(len=128) :: version = '$Id: ocean_model.F90,v 20.0 2013/12/14 00:10:47 fms Exp $'
+  character(len=128) :: version = '$Id: ocean_model.F90,v 20.0 2014/11/28 00:10:47 fms Exp IOW 3 $'
   character(len=128) :: tagname = '$Name: tikal $'
 
   type(ocean_external_mode_type), save           :: Ext_mode
@@ -1167,6 +1178,7 @@ subroutine ocean_model_init(Ocean, Ocean_state, Time_init, Time_in)
     allocate(bott_blthick(isd:ied,jsd:jed))    
     allocate(rossby_radius(isd:ied,jsd:jed))    
     allocate(swheat(isd:ied,jsd:jed,nk))
+    allocate(coszen(isd:ied,jsd:jed))
 #endif
 #if defined (ENABLE_ODA) && defined (ENABLE_ECDA)
     allocate(da_flux%u_flux(isd:ied,jsd:jed))    ! snz
@@ -1205,6 +1217,7 @@ subroutine ocean_model_init(Ocean, Ocean_state, Time_init, Time_in)
     bott_blthick                = 0.0
     rossby_radius               = 0.0
     swheat                      = 0.0
+    coszen                      = 0.0
 
     call ocean_types_init()
     call ocean_tracer_util_init(Grid, Domain, use_blobs)
@@ -1214,7 +1227,7 @@ subroutine ocean_model_init(Ocean, Ocean_state, Time_init, Time_in)
                              use_velocity_override, debug=debug)
     call ocean_barotropic_init(Grid, Domain, Time, Time_steps, Ocean_options, Ext_mode, have_obc,       &
                                vert_coordinate, vert_coordinate_class, horz_grid, cmip_units, use_blobs,&
-                               introduce_blobs, use_velocity_override, debug=debug)    
+                               introduce_blobs, use_velocity_override, debug=debug)   
     call ocean_thickness_init(Time, Time_steps, Domain, Grid, Ext_mode, Thickness,          &
                               vert_coordinate, vert_coordinate_class, vert_coordinate_type, &
                               use_blobs, introduce_blobs, dtime_t, debug=debug)
@@ -1535,9 +1548,9 @@ subroutine ocean_model_init(Ocean, Ocean_state, Time_init, Time_in)
 
        ! obtain surface boundary fluxes from coupler
        call mpp_clock_begin(id_sbc)
-       call get_ocean_sbc(Time, Ice_ocean_boundary, Thickness, Dens, Ext_mode,       &
+       call get_ocean_sbc(Time, Ice_ocean_boundary, Thickness, Dens, Waves, Ext_mode,       &
             T_prog(1:num_prog_tracers), Velocity, pme, melt, river, runoff, calving, &
-            upme, uriver, swflx, swflx_vis, patm)
+            upme, uriver, swflx, swflx_vis, patm, coszen)
        call mpp_clock_end(id_sbc)
 
        ! compute "flux adjustments" (e.g., surface tracer restoring, flux correction)
@@ -1566,7 +1579,7 @@ subroutine ocean_model_init(Ocean, Ocean_state, Time_init, Time_in)
        else
         ! compute the sw penetration
          call sw_source(Time, Thickness, Dens, T_diag(:), swflx, swflx_vis, &
-                        T_prog(index_temp), sw_frac_zt, opacity)
+                        T_prog(index_temp), sw_frac_zt, opacity, coszen)
        endif
        call mpp_clock_end(id_sw)
 
@@ -1574,7 +1587,7 @@ subroutine ocean_model_init(Ocean, Ocean_state, Time_init, Time_in)
        ! if use kpp, also add nonlocal tendency to T_prog%th_tendency 
        call mpp_clock_begin(id_vmix)    
        call vert_mix_coeff(Time, Thickness, Velocity, T_prog(1:num_prog_tracers),&
-            T_diag(1:num_diag_tracers), Dens, swflx, sw_frac_zt, pme,            &
+            T_diag(1:num_diag_tracers), Dens, Waves, swflx, sw_frac_zt, pme,            &
             river, visc_cbu, visc_cbt, diff_cbt, surf_blthick, do_wave)
        call mpp_clock_end(id_vmix)
 
@@ -1796,7 +1809,7 @@ subroutine ocean_model_init(Ocean, Ocean_state, Time_init, Time_in)
        call mpp_clock_begin(id_tracer)
        call update_ocean_tracer(Time, Dens, Adv_vel, Thickness, pme, diff_cbt, &
             T_prog(1:num_prog_tracers), T_diag(1:num_diag_tracers), Lagrangian_system, Velocity,       &
-            Ext_mode, EL_diag(:), use_blobs)
+            Ext_mode, EL_diag(:), use_blobs, Waves, surf_blthick)
        call mpp_clock_end(id_tracer)
 
        ! update to time=taup1 Salinity variable used in density equations
@@ -1998,7 +2011,7 @@ subroutine ocean_model_init(Ocean, Ocean_state, Time_init, Time_in)
     call mpp_clock_end(id_oda)
 #endif
 
-    call update_ocean_drifters(Velocity, Adv_vel, T_prog(:), Grid, Time)
+    call update_ocean_drifters(Velocity, Adv_vel, T_prog(:), Grid, Time, Domain) ! iow !
     
     ! sum ocean sfc state over coupling interval
     call mpp_clock_begin(id_ocean_sfc)
@@ -3149,6 +3162,7 @@ subroutine ice_ocn_bnd_type_chksum(id, timestep, iobt)
     write(outunit,100) 'iobt%runoff         ', mpp_chksum( iobt%runoff         )
     write(outunit,100) 'iobt%calving        ', mpp_chksum( iobt%calving        )
     write(outunit,100) 'iobt%p              ', mpp_chksum( iobt%p              )
+    write(outunit,100) 'iobt%coszen         ', mpp_chksum( iobt%coszen         )
 
 100 FORMAT("   CHECKSUM::",A20," = ",Z20)
     do n = 1, iobt%fluxes%num_bcs  !{

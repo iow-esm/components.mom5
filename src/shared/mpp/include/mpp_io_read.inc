@@ -17,6 +17,8 @@
 #include <mpp_read_2Ddecomp.h>
 
     subroutine read_record_core(unit, field, nwords, data, start, axsiz)
+      USE ISO_C_BINDING
+
       integer,         intent(in)    :: unit
       type(fieldtype), intent(in)    :: field
       integer,         intent(in)    :: nwords
@@ -24,7 +26,6 @@
       integer,         intent(in)    :: start(:), axsiz(:) 
 
       integer(SHORT_KIND) :: i2vals(nwords)
-!rab used in conjunction with transfer intrinsic to determine size of a variable
       integer(KIND=1) :: one_byte(8)
       integer         :: word_sz
 !#ifdef __sgi
@@ -44,6 +45,8 @@
 
 #ifdef use_netCDF
       word_sz = size(transfer(data(1),one_byte))
+!kk      word_sz = size(transfer(data(1),one_byte))  !kk  This Statement does not give correct word length on Cray
+!tsft fails with Intel Composer      word_sz = c_sizeof(data(1))                    !kk  Standard in FORTRAN 2003
 
           select case (field%type)
              case(NF_BYTE)
@@ -71,7 +74,7 @@
                 end if
              case(NF_FLOAT)
                 ptr3 = LOC(mpp_io_stack(1))
-                if (size(transfer(rvals(1),one_byte)) .eq. word_sz) then
+                if (word_sz == 4) then
                   error = NF_GET_VARA_REAL  ( mpp_file(unit)%ncid, field%id, start, axsiz, data  )
                   call netcdf_err( error, mpp_file(unit), field=field )
                   if(field%scale /= 1.0 .or. field%add /= 0.0) then
@@ -88,7 +91,7 @@
                 end if
              case(NF_DOUBLE)
                 ptr4 = LOC(mpp_io_stack(1))
-                if (size(transfer(r8vals(1),one_byte)) .eq. word_sz) then
+                if (word_sz == 8) then
                   error = NF_GET_VARA_DOUBLE( mpp_file(unit)%ncid, field%id, start, axsiz, data )
                   call netcdf_err( error, mpp_file(unit), field=field )
                   if(field%scale /= 1.0 .or. field%add /= 0.0) then

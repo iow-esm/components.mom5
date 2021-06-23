@@ -1155,6 +1155,10 @@ ierr = check_nml_error(io_status,'ocean_density_nml')
      T_diag(ind_neutralrho)%field(:,:,:) = Dens%neutralrho(:,:,:)
    endif
 
+! iow ! neutralrho_interval_r is already needed by following subroutine
+   neutralrho_interval  = (neutralrho_max-neutralrho_min)/(epsln+layer_nk)
+   neutralrho_interval_r = 1.0/neutralrho_interval
+
    ! compute some density related diagnostic factors 
    call compute_diagnostic_factors(Time, Thickness, Dens, salinity, temperature)
 
@@ -1273,7 +1277,6 @@ ierr = check_nml_error(io_status,'ocean_density_nml')
   allocate ( Dens%neutralrho_bounds(layer_nk+1))
   allocate ( neutralrho_bounds(layer_nk+1))
   neutralrho_bounds(1) = neutralrho_min
-  neutralrho_interval  = (neutralrho_max-neutralrho_min)/(epsln+layer_nk)
   do k=2,layer_nk+1
     neutralrho_bounds(k)=neutralrho_bounds(k-1)+neutralrho_interval
   enddo 
@@ -1283,7 +1286,6 @@ ierr = check_nml_error(io_status,'ocean_density_nml')
   do k=1,layer_nk+1
     Dens%neutralrho_bounds(k) = neutralrho_bounds(k)
   enddo 
-  neutralrho_interval_r = 1.0/neutralrho_interval
 
   ! define vertical axes according to 
   ! potential temperature or conservative temperature classes
@@ -2277,7 +2279,7 @@ end subroutine update_ocean_density
                 t2  = t1*t1
 
                 s1  = salinity(i,j,k)
-                sp5 = sqrt(s1) 
+                sp5 = sqrt(max(s1,0.0)) 
 
                 p1   = pressure(i,j,k) - press_standard
                 p1t1 = p1*t1
@@ -2308,7 +2310,7 @@ end subroutine update_ocean_density
                 t2  = t1*t1
 
                 s1  = salinity(i,j,k)
-                sp5 = sqrt(s1)
+                sp5 = sqrt(max(s1,0.0))
 
                 p1   = pressure(i,j,k) - press_standard
                 p1t1 = p1*t1
@@ -2395,7 +2397,7 @@ end subroutine update_ocean_density
              t2  = t1*t1
 
              s1  = salinity(i,j)
-             sp5 = sqrt(s1) 
+             sp5 = sqrt(max(s1,0.0)) 
 
              p1   = pressure(i,j) - press_standard
              p1t1 = p1*t1
@@ -2422,7 +2424,7 @@ end subroutine update_ocean_density
              t2  = t1*t1
 
              s1  = salinity(i,j)
-             sp5 = sqrt(s1)
+             sp5 = sqrt(max(s1,0.0))
 
              p1   = pressure(i,j) - press_standard
              p1t1 = p1*t1
@@ -2505,7 +2507,7 @@ end subroutine update_ocean_density
            t2  = t1*t1
 
            s1  = salinity(i)
-           sp5 = sqrt(s1) 
+           sp5 = sqrt(max(s1,0.0)) 
 
            p1   = pressure(i) - press_standard
            p1t1 = p1*t1
@@ -2529,7 +2531,7 @@ end subroutine update_ocean_density
            t2  = t1*t1
 
            s1  = salinity(i)
-           sp5 = sqrt(s1)
+           sp5 = sqrt(max(s1,0.0))
 
            p1   = pressure(i) - press_standard
            p1t1 = p1*t1
@@ -2647,7 +2649,7 @@ end subroutine update_ocean_density
         t2  = t1*t1
 
         s1  = salinity
-        sp5 = sqrt(s1) 
+        sp5 = sqrt(max(s1,0.0)) 
 
         num = a0n + t1*(a1n + t1*(a2n+a3n*t1) )    &
              + s1*(a4n + a5n*t1  + a6n*s1)       
@@ -2725,7 +2727,7 @@ end subroutine update_ocean_density
                      t2  = t1*t1
 
                      s1  = salinity(i,j,k)
-                     sp5 = sqrt(s1) 
+                     sp5 = sqrt(max(s1,0.0)) 
 
                      p1t1 = p1*t1
 
@@ -2751,7 +2753,7 @@ end subroutine update_ocean_density
                      t2  = t1*t1
 
                      s1  = salinity(i,j,k)
-                     sp5 = sqrt(s1) 
+                     sp5 = sqrt(max(s1,0.0)) 
 
                      num = a0 + t1*(a1 + t1*(a2+a3*t1) )  &
                           + s1*(a4 + a5*t1  + a6*s1)        
@@ -2778,7 +2780,7 @@ end subroutine update_ocean_density
                      t2  = t1*t1
 
                      s1  = salinity(i,j,k)
-                     sp5 = sqrt(s1) 
+                     sp5 = sqrt(max(s1,0.0)) 
 
                      p1t1 = p1*t1
 
@@ -2810,7 +2812,7 @@ end subroutine update_ocean_density
                      t2  = t1*t1
 
                      s1  = salinity(i,j,k)
-                     sp5 = sqrt(s1) 
+                     sp5 = sqrt(max(s1,0.0)) 
 
                      num = v01 + t1*(v02 + t1*(v03 + v04*t1))         &
                           + s1*(v05 + t1*(v06 + v07*t1)               &
@@ -3348,7 +3350,7 @@ end subroutine compute_density_diagnostics
                 t2  = t1*t1
 
                 s1  = salinity(i,j,1)
-                sp5 = sqrt(s1) 
+                sp5 = sqrt(max(s1,0.0)) 
 
                 p1   = pressure(i,j,k) - press_standard 
                 p1t1 = p1*t1
@@ -3377,7 +3379,7 @@ end subroutine compute_density_diagnostics
                 t2  = t1*t1
 
                 s1  = salinity(i,j,1)
-                sp5 = sqrt(s1)
+                sp5 = sqrt(max(s1,0.0))
 
                 p1   = pressure(i,j,k) - press_standard
                 p1t1 = p1*t1
@@ -3449,7 +3451,7 @@ end subroutine compute_density_diagnostics
     elseif(eos_preteos10) then 
 
        t2  = t1*t1
-       sp5 = sqrt(s1) 
+       sp5 = sqrt(max(s1,0.0)) 
 
        p1   = pressure - press_standard 
        p1t1 = p1*t1
@@ -3468,7 +3470,7 @@ end subroutine compute_density_diagnostics
     else ! eos_teos10 
 
        t2  = t1*t1
-       sp5 = sqrt(s1) 
+       sp5 = sqrt(max(s1,0.0)) 
 
        p1   = pressure - press_standard
        p1t1 = p1*t1
@@ -3561,7 +3563,7 @@ end subroutine compute_density_diagnostics
                  t1  = theta(i,j,k)
                  t2  = t1*t1
                  s1  = salinity(i,j,k)
-                 sp5 = sqrt(s1) 
+                 sp5 = sqrt(max(s1,0.0)) 
 
                  p1   = pressure(i,j,k) - press_standard 
                  p1t1 = p1*t1
@@ -3596,7 +3598,7 @@ end subroutine compute_density_diagnostics
                  t1  = theta(i,j,k)
                  t2  = t1*t1
                  s1  = salinity(i,j,k)
-                 sp5 = sqrt(s1)
+                 sp5 = sqrt(max(s1,0.0))
 
                  p1   = pressure(i,j,k) - press_standard
                  p1t1 = p1*t1
@@ -3748,7 +3750,7 @@ end subroutine compute_density_diagnostics
               t1  = theta(i,j)
               t2  = t1*t1
               s1  = salinity(i,j)
-              sp5 = sqrt(s1) 
+              sp5 = sqrt(max(s1,0.0)) 
 
               p1   = pressure(i,j) - press_standard 
               p1t1 = p1*t1
@@ -3774,11 +3776,17 @@ end subroutine compute_density_diagnostics
         enddo
 
     else ! eos_teos10 
+!kk      Klaus Ketelsen
+!kk      I assume that the loops were missing, but I am not sure
+!kk      Nevertheless does the asis version not run correctly because i and j are undefined
+        do j=jsd,jed
+           do i=isd,ied
+
 
         t1  = theta(i,j)
         t2  = t1*t1
         s1  = salinity(i,j)
-        sp5 = sqrt(s1) 
+        sp5 = sqrt(max(s1,0.0)) 
 
         p1   = pressure(i,j) - press_standard 
         p1t1 = p1*t1
@@ -3818,6 +3826,8 @@ end subroutine compute_density_diagnostics
         density_theta(i,j)    = denominator_r(i,j,klevel)*(dnum_dtheta    - rho(i,j)*dden_dtheta)
         density_salinity(i,j) = denominator_r(i,j,klevel)*(dnum_dsalinity - rho(i,j)*dden_dsalinity)
         density_press(i,j)    = denominator_r(i,j,klevel)*(dnum_dpress    - rho(i,j)*dden_dpress)
+           enddo                  !kk
+        enddo
 
 
     endif   ! endif for eos choice
@@ -3881,7 +3891,7 @@ end subroutine compute_density_diagnostics
         t1  = theta
         t2  = t1*t1
         s1  = salinity
-        sp5 = sqrt(s1) 
+        sp5 = sqrt(max(s1,0.0)) 
 
         p1   = pressure - press_standard 
         p1t1 = p1*t1
@@ -3915,7 +3925,7 @@ end subroutine compute_density_diagnostics
         t1  = theta
         t2  = t1*t1
         s1  = salinity
-        sp5 = sqrt(s1) 
+        sp5 = sqrt(max(s1,0.0)) 
 
         p1   = pressure - press_standard 
         p1t1 = p1*t1
@@ -4079,7 +4089,7 @@ end subroutine compute_density_diagnostics
                 t1   = theta(i,j,k)
                 t2   = t1*t1
                 s1   = salinity(i,j,k)
-                sp5  = sqrt(s1) 
+                sp5  = sqrt(max(s1,0.0)) 
                 p1   = press(i,j,k) - press_standard 
                 p2   = p1*p1
                 p1t1 = p1*t1
@@ -4156,7 +4166,7 @@ end subroutine compute_density_diagnostics
                 t1   = theta(i,j,k)
                 t2   = t1*t1
                 s1   = salinity(i,j,k)
-                sp5  = sqrt(s1)
+                sp5  = sqrt(max(s1,0.0))
                 p1   = press(i,j,k) - press_standard
                 p2   = p1*p1
                 p1t1 = p1*t1

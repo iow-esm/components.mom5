@@ -3,6 +3,21 @@
 
 ! $Id: drifters_comm.F90,v 20.0 2013/12/14 00:19:06 fms Exp $
 
+!<CONTACT EMAIL="torsten.seifert@io-warnemuende.de"> Torsten Seifert 
+!</CONTACT>
+!<CONTACT EMAIL="klaus-ketelsen@t-online.de"> Klaus Ketelsen 
+!</CONTACT>
+!<DESCRIPTION>
+!  IOW version 3.0 from 2014/11/28
+!  code changes: _DEBUG option
+!  add optional noise to drifter positions
+!  characterise crossing directions by sums of integers
+!  data domain no longer necessary (could be removed)
+!  reorganised MPI communication of neighbor PEs by Klaus Ketelsen reduces runtime to 3% 
+!</DESCRIPTION>
+! iow !#define _DEBUG
+! iow ! debugging needs compile option CPPFLAGS = -DNO_DEV_NULL for separate PE output
+
 module drifters_comm_mod
 
 #ifdef _SERIAL
@@ -12,7 +27,7 @@ module drifters_comm_mod
 
 #else
 
-  use mpp_mod,         only        : NULL_PE, FATAL, NOTE, mpp_error, mpp_pe, mpp_npes
+  use mpp_mod,         only        : NULL_PE, FATAL, NOTE, mpp_error, mpp_pe, mpp_npes, stdout ! iow !
   use mpp_mod,         only        : mpp_root_pe
   use mpp_mod,         only        : mpp_send, mpp_recv, mpp_sync_self
   use mpp_mod,         only        : COMM_TAG_1, COMM_TAG_2, COMM_TAG_3, COMM_TAG_4
@@ -21,6 +36,12 @@ module drifters_comm_mod
   use mpp_domains_mod, only        : mpp_get_compute_domain, mpp_get_data_domain
   use mpp_domains_mod, only        : NORTH, SOUTH, EAST, WEST, CYCLIC_GLOBAL_DOMAIN
   use mpp_domains_mod, only        : NORTH_EAST, SOUTH_EAST, SOUTH_WEST, NORTH_WEST
+
+! iow ! reorganised pe communication by Klaus Ketelsen
+  use mpi
+  use mpp_mod,          only : mpp_clock_id, mpp_clock_begin, mpp_clock_end, mpp_pe
+  use fms_mod,          only : CLOCK_ROUTINE, stdlog
+  use mpp_mod,          only : mpp_sum ! for debugging
 
 #define _TYPE_DOMAIN2D type(domain2d)
 #define _NULL_PE NULL_PE
@@ -31,6 +52,13 @@ module drifters_comm_mod
 
   implicit none
   private
+
+! iow ! pe communication timing by Klaus Ketelsen
+  integer,save,public           :: id_trans
+
+!!   interface drifters_comm_update
+!!     module procedure drifters_comm_update
+!!   end interface drifters_comm_update
 
   public :: drifters_comm_type, drifters_comm_new, drifters_comm_del, drifters_comm_set_pe_neighbors
   public :: drifters_comm_set_domain, drifters_comm_update, drifters_comm_gather
@@ -47,6 +75,8 @@ module drifters_comm_mod
      real           :: ygmin, ygmax
      ! x/y period (can be be nearly infinite)
      logical        :: xperiodic, yperiodic
+     ! save reference pe ! iow 
+     integer        :: pe
      ! neighbor domains
      integer        :: pe_N, pe_S, pe_E, pe_W, pe_NE, pe_SE, pe_SW, pe_NW
      ! starting/ending pe, set this to a value /= 0 if running concurrently
@@ -70,6 +100,7 @@ contains
 
     self%xperiodic = .FALSE.; self%yperiodic = .FALSE.
 
+    self%pe    = mpp_pe()
     self%pe_N  = _NULL_PE
     self%pe_S  = _NULL_PE
     self%pe_E  = _NULL_PE
@@ -235,6 +266,7 @@ contains
     halox = max(0, hx - bckf_x)
     haloy = max(0, hy - bckf_y)
 
+! iow ! this applies only to equidistant grids !
     if(isd < 1) then
        dx = x(2) - x(1)
        xdmin = self%xcmin - dx*halox
@@ -273,6 +305,8 @@ contains
   end subroutine drifters_comm_set_domain
 
 !===============================================================================
+
+! iow ! drifters_comm_update reorganised for effective communication by Klaus Ketelsen
   subroutine drifters_comm_update(self, drfts, new_positions, &
        & comm, remove, max_add_remove)
 
@@ -285,23 +319,18 @@ contains
 
 #ifdef _SERIAL
 ! serial code
-    
+
     drfts%positions(:, 1:drfts%np) = new_positions(:, 1:drfts%np)
     return
 
 #else
-! parallel code
+ ! parallel code
 
-    include 'mpif.h'
-
-
-    integer nd, np, nar_est, ip, neigh_pe, irem, pe, npes, ntuples
+    integer nd, np, ip, neigh_ind, irem, pe, npes, ntuples
     integer ntuples_tot, ndata, mycomm
-#ifdef _USE_MPI
-    integer ier 
-#endif
-    integer, allocatable :: iadd(:)
-    integer, allocatable :: table_recv(:), table_send(:)
+    integer,save         :: nar_est=1                       !kk save buffer size and enlarge if necessary
+    integer              :: iadd(8)
+    integer              :: table_recv(8), table_send(8)
     real   , allocatable :: data_recv(:,:), data_send(:,:)
     integer, allocatable :: indices_to_remove(:)
     integer, allocatable :: ids_to_add(:)
@@ -310,190 +339,291 @@ contains
     character(len=128) :: ermsg, notemsg
     logical            :: is_present
     integer            :: id, j, k, m, n, el
-    logical            :: crossed_W, crossed_E, crossed_S, crossed_N
-    logical            :: was_in_compute_domain, left_domain
+! iow ! more effective to indicate cross directions by (sums of) integers
+! iow ! N=1, E=2, S=4, W=8 => NE=3, SE=6, SW=12, NW=9
+! iow ! corresponding to send_list N=1 ... NW=8 below
+    integer :: icrossed 
+    logical            :: left_domain
+
+    integer                   :: ierr, iun, send_pe, recv_pe
+    integer, dimension(16)    :: req
+    integer, dimension(8)     :: send_list, recv_list
+    integer,dimension(2)      :: glo_tran
+
+ ! iow ! add noise to new drifter positions
+    real, allocatable :: rnoise(:,:)
+    integer, allocatable :: seed(:)
+    integer :: ks, kseed, msec, pid, getpid
+    real :: del, delx, dely, deg2m, deg2rad, cosy, coff
 
     mycomm = MPI_COMM_WORLD
     if( present(comm) ) mycomm = comm
+
+#ifdef _DEBUG
+!kk This barrier ist set to seperate loadbalancing timings
+!kk Can be removed for production runs
+    call MPI_Barrier(mycomm, ierr)    
+# endif
+    call mpp_clock_begin(id_trans)
 
     nd = drfts%nd
     np = size(new_positions,2)
     if(np > 0 .and. nd < 2) call mpp_error( FATAL, &
          & 'drifters_comm_update: number of dimensions must be 2 or higher.' )
 
-    nar_est = 100 
-    if(present(max_add_remove)) nar_est = max(1, max_add_remove)
+ !kk nar_est can be internally enlarged, therefore take max of nar_est and max_add_remove
+ !kk at first call, max_add_remove sets initial buffer size
+    if(present(max_add_remove)) then
+       nar_est = max(nar_est, max_add_remove)
+    else
+       nar_est = drfts%npdim ! (iow)
+    end if
 
     pe   = mpp_pe()
     npes = mpp_npes()
+    iun  = stdlog()
 
-    ! assume pe list is contiguous, self%pe_beg...self%pe_end
-    allocate(iadd(self%pe_beg:self%pe_end))
-    allocate(table_recv(self%pe_beg:self%pe_end))
-    allocate(table_send(self%pe_beg:self%pe_end))
-    allocate(data_recv(nar_est*(1+nd), self%pe_beg:self%pe_end))
-    allocate(data_send(nar_est*(1+nd), self%pe_beg:self%pe_end))
+    allocate(data_send(nar_est*(1+nd), 8))
     allocate(indices_to_remove(nar_est))
 
     table_send = 0
     table_recv = 0
     data_send  = 0
-    data_recv  = 0
+
+ !kk setup PE lists (indices running N to NW)
+    send_list(1) = self%pe_N
+    send_list(2) = self%pe_NE
+    send_list(3) = self%pe_E
+    send_list(4) = self%pe_SE
+    send_list(5) = self%pe_S
+    send_list(6) = self%pe_SW
+    send_list(7) = self%pe_W
+    send_list(8) = self%pe_NW
+
+ ! iow ! add noise to new drifter positions
+    if (drfts%add_noise.and.np.gt.0) then
+ ! iow ! initialise random numbers from pid and system time
+      call random_seed(size = kseed)
+      allocate(seed(kseed))
+      pid = getpid()
+      call system_clock(msec)
+      seed = ieor(pid,msec) + 37 * (/ (ks,ks=0,kseed-1) /)
+      call random_seed(put=seed(1:kseed))
+      allocate(rnoise(2,np)) ! only horizontally 2D
+      call random_number(rnoise) ! [0:1]
+ !!      if (drfts%debug) then
+ !!        write(*,*) 'pe, it, r_noise =',self%pe,drfts%it,minval(rnoise),' ...',maxval(rnoise)
+ !!      endif
+ ! iow ! add some noise to drifter positions
+      deg2m = 1.11195e5      ! degrees to meters 2*pi*r_earth[m]/360
+      deg2rad=1.745329252e-2 ! degrees to radian
+      do ip = 1, np
+        x = new_positions(1, ip)
+        y = new_positions(2, ip)
+        xold = drfts%positions(1, ip)
+        yold = drfts%positions(2, ip)
+ ! iow ! estimate local drifter velocity by position offsets [m]
+        cosy = cos(deg2rad*y)
+        delx = (x - xold)*deg2m*cosy
+        dely = (y - yold)*deg2m
+        del  = sqrt(delx*delx+dely*dely)
+ ! iow ! noise offsets (degrees)
+        coff = min((del/drfts%vnoise)**2,1e0)*drfts%anoise/deg2m
+        rnoise(1,ip) = (rnoise(1,ip)-0.5)*coff/cosy
+        rnoise(2,ip) = (rnoise(2,ip)-0.5)*coff
+ !!! iow ! for debugging
+ !!        if (drfts%debug) then
+ !!          write(*,*) 'np, xnew,xold, ynew,yold',drfts%ids(ip),x,xold,y,yold
+ !!          write(*,*) 'np, cosy,delx,dely,del,coff',drfts%ids(ip),cosy,delx,dely,del,coff
+ !!          write(*,*) 'np, x_noise, y_noise',drfts%ids(ip),rnoise(1,ip),rnoise(2,ip)
+ !!        endif
+      enddo
+      if (drfts%debug) then
+        write(*,*) 'pe, it, a_noise, v_noise =',self%pe,drfts%it,drfts%anoise,drfts%vnoise
+        write(*,*) 'pe, it, x_noise =',self%pe,drfts%it,minval(rnoise(1,:)),' ...',maxval(rnoise(1,:))
+        write(*,*) 'pe, it, y_noise =',self%pe,drfts%it,minval(rnoise(2,:)),' ...',maxval(rnoise(2,:))
+      endif
+ ! iow ! add noise to new positions
+      new_positions(:,:) = new_positions(:,:) + rnoise(:,:)
+      deallocate(rnoise)
+    endif
 
     iadd = 0
     irem = 0
     do ip = 1, np
        x = new_positions(1, ip)
        y = new_positions(2, ip)
-       xold = drfts%positions(1, ip)
-       yold = drfts%positions(2, ip)
 
-       if(    xold<self%xcmin .or. xold>self%xcmax .or. &
-            & yold<self%ycmin .or. yold>self%ycmax      ) then
-          was_in_compute_domain = .FALSE.
-       else
-          was_in_compute_domain = .TRUE.
+! iow ! indicate cross direction by sum of integers
+      ! check if drifters crossed compute domain boundary
+       icrossed=0
+       if( y>self%ycmax ) icrossed = 1
+       if( x>self%xcmax ) icrossed = icrossed+2
+       if( y<self%ycmin ) icrossed = icrossed+4
+       if( x<self%xcmin ) icrossed = icrossed+8
+      ! define neighbor index
+       select case (icrossed)
+       case(0) 
+            neigh_ind = -1
+       case(1) 
+            neigh_ind = 1
+       case(3) 
+            neigh_ind = 2
+       case(2) 
+            neigh_ind = 3
+       case(6) 
+            neigh_ind = 4
+       case(4) 
+            neigh_ind = 5
+       case(12) 
+            neigh_ind = 6
+       case(8) 
+            neigh_ind = 7
+       case(9) 
+            neigh_ind = 8
+       case default
+            write(notemsg,'(a,i3)') 'drifters_comm_update: wrong icrossed',icrossed
+            call mpp_error( FATAL, notemsg)
+       end select
+#ifdef _DEBUG
+       if (icrossed.gt.0) then ! iow ! debugging
+         write(stdout(),'(a,5i6,2f15.10)') '--> it,pe,neigh_pe,icrossed,id,position',drfts%it,pe,neigh_pe,icrossed,drfts%ids(ip),x,y
        endif
+#endif
 
-       ! check if drifters crossed compute domain boundary 
-       
-       crossed_W = .FALSE.
-       crossed_E = .FALSE.
-       crossed_S = .FALSE.
-       crossed_N = .FALSE.
-       if( was_in_compute_domain .and. &
-            & (x<self%xcmin) .and. (xold>self%xcmin) ) crossed_W = .TRUE.
-       if( was_in_compute_domain .and. &
-            & (x>self%xcmax) .and. (xold<self%xcmax) ) crossed_E = .TRUE.
-       if( was_in_compute_domain .and. &
-            & (y<self%ycmin) .and. (yold>self%ycmin) ) crossed_S = .TRUE.
-       if( was_in_compute_domain .and. &
-            & (y>self%ycmax) .and. (yold<self%ycmax) ) crossed_N = .TRUE.
-
-       neigh_pe = _NULL_PE
-       if(crossed_N .and. .not. crossed_E .and. .not. crossed_W) neigh_pe = self%pe_N
-       if(crossed_N .and.       crossed_E                      ) neigh_pe = self%pe_NE
-       if(crossed_E .and. .not. crossed_N .and. .not. crossed_S) neigh_pe = self%pe_E
-       if(crossed_S .and.       crossed_E                      ) neigh_pe = self%pe_SE
-       if(crossed_S .and. .not. crossed_E .and. .not. crossed_W) neigh_pe = self%pe_S
-       if(crossed_S .and.       crossed_W                      ) neigh_pe = self%pe_SW
-       if(crossed_W .and. .not. crossed_S .and. .not. crossed_N) neigh_pe = self%pe_W
-       if(crossed_N .and.       crossed_W                      ) neigh_pe = self%pe_NW
-
-       if(neigh_pe /= _NULL_PE) then
-          iadd(neigh_pe) = iadd(neigh_pe) + 1
-          if(iadd(neigh_pe) > nar_est) then
-             write(notemsg, '(a,i4,a,i4,a)') 'drifters_comm_update: exceeded nar_est (', &
-                  & iadd(neigh_pe),'>',nar_est,').'
-             call mpp_error( FATAL, notemsg)
+       if(neigh_ind /= -1) then
+          iadd(neigh_ind) = iadd(neigh_ind) + 1
+          if(iadd(neigh_ind) > nar_est) then
+             call enlarge_buffers
           endif
-          table_send(neigh_pe)  = table_send(neigh_pe) + 1
-          k = ( iadd(neigh_pe)-1 )*(1+nd) + 1
-          data_send(k       , neigh_pe) = drfts%ids(ip)
-          data_send(k+1:k+nd, neigh_pe) = new_positions(:,ip)
+          table_send(neigh_ind)  = table_send(neigh_ind) + 1
+          k = ( iadd(neigh_ind)-1 )*(1+nd) + 1
+          data_send(k       , neigh_ind) = drfts%ids(ip)
+          data_send(k+1:k+nd, neigh_ind) = new_positions(:,ip)
        endif
 
-       ! check if drifters left data domain
+      ! check if drifters left data domain
 
        left_domain = .FALSE.
-       if(       (x<self%xdmin .and. (self%pe_W/=pe)) .or. &
-            &    (x>self%xdmax .and. (self%pe_E/=pe)) .or. &
-            &    (y<self%ydmin .and. (self%pe_S/=pe)) .or. &
-            &    (y>self%ydmax .and. (self%pe_N/=pe)) ) then
+       if(       (x<self%xcmin .and. (self%pe_W/=pe)) .or. &
+            &    (x>self%xcmax .and. (self%pe_E/=pe)) .or. &
+            &    (y<self%ycmin .and. (self%pe_S/=pe)) .or. &
+            &    (y>self%ycmax .and. (self%pe_N/=pe)) ) then
           left_domain = .TRUE.
        endif
 
-       ! remove if particle was tagged as such
+      ! remove if particle was tagged as such
 
        if(present(remove)) then
-          if(remove(ip)) left_domain = .TRUE.
+           if(remove(ip)) left_domain = .TRUE.
        endif
 
        if(left_domain) then
           irem = irem + 1
           if(irem > nar_est) then
-             write(notemsg, '(a,i4,a,i4,a)') 'drifters_comm_update: exceeded nar_est (',&
-                  & irem,'>',nar_est,').'
-             call mpp_error( FATAL, notemsg)
+             call enlarge_buffers
           endif
           indices_to_remove(irem) = ip
        endif
 
     enddo
 
-
-    ! update drifters' positions (remove whatever needs to be removed later)
+   ! update drifters' positions (remove whatever needs to be removed later)
     call drifters_core_set_positions(drfts, new_positions, ermsg)
     if(ermsg/='') call mpp_error( FATAL, ermsg)
 
-    ! fill in table_recv from table_send. table_send contains the
-    ! number of tuples that will be sent to another pe. table_recv
-    ! will contain the number of tuples to be received. The indices 
-    ! of table_send refer to the pe where the tuples should be sent to;
-    ! the indices of table_recv refer to the pe number 
-    ! (self%pe_beg..self%pe_end) from
-    ! which the tuple should be received from.
-    !
-    ! table_send(to_pe) = ntuples; table_recv(from_pe) = ntuples
+   ! fill in table_recv from table_send. table_send contains the
+   ! number of tuples that will be sent to another pe. table_recv
+   ! will contain the number of tuples to be received. The indices
+   ! of table_send refer to the pe where the tuples should be sent to;
+   ! the indices of table_recv refer to the pe number
+   ! (self%pe_beg..self%pe_end) from
+   ! which the tuple should be received from.
+   !
+   ! table_send(to_pe) = ntuples; table_recv(from_pe) = ntuples
 
-    ! the following is a transpose operation
-    ! table_send(m)[pe] -> table_recv(pe)[m]
-    do m = self%pe_beg, self%pe_end
-#ifdef _USE_MPI
-       call MPI_Scatter (table_send   , 1, MPI_INTEGER,  &
-            &            table_recv(m), 1, MPI_INTEGER,  &
-            &            m, mycomm, ier )
-#else
-       if(pe==m) then
-          do k = self%pe_beg, self%pe_end
-             call mpp_send(table_send(k), plen=1, to_pe=k, tag=COMM_TAG_1)
-          enddo
-       endif
-       call mpp_recv(table_recv(m), glen=1, from_pe=m, tag=COMM_TAG_1)    
+   ! the following is a transpose operation
+   ! table_send(m)[pe] -> table_recv(pe)[m]
+
+    k = 0                                  !Number of MPI requests
+    do m = 1,8
+       recv_pe = send_list(m)
+       if(recv_pe /= _NULL_PE)   then
+          k     = k+1
+#ifdef _DEBUG
+          write (stdlog(),*) 'recv_1 ',m,k,recv_pe,shape(table_recv),table_recv(m)
 #endif
+          call MPI_Irecv (table_recv(m), 1, MPI_INTEGER, recv_pe, COMM_TAG_1, mycomm, req(k), ierr)
+       end if
     enddo
-
-    ! communicate new positions. data_send is an array of size n*(nd+1) times npes.
-    ! Each column j of data_send contains the tuple (id, x, y, ..) to be sent to pe=j.
-    ! Inversely, data_recv's column j contains tuples (id, x, y,..) received from pe=j.
-    do m = self%pe_beg, self%pe_end
-       ntuples = table_send(m)
-       ndata   = ntuples*(nd+1)
-       ! should be able to send ndata?
-#ifdef _USE_MPI
-       call MPI_Scatter (data_send     , nar_est*(1+nd), MPI_REAL8, &
-            &            data_recv(1,m), nar_est*(1+nd), MPI_REAL8, &
-            &            m, mycomm, ier )
-#else
-       if(pe==m) then
-          do k = self%pe_beg, self%pe_end
-             call mpp_send(data_send(1,k), plen=nar_est*(1+nd), to_pe=k, tag=COMM_TAG_2)
-          enddo
-       endif
-       call mpp_recv(data_recv(1,m), glen=nar_est*(1+nd), from_pe=m, tag=COMM_TAG_2)           
+    do m = 1,8
+       ndata = nar_est*(1+nd)
+       send_pe = send_list(m)
+       if(send_pe /= _NULL_PE)   then
+          k     = k+1
+#ifdef _DEBUG
+          write (stdlog(),*) 'send_1 ',m,k,send_pe,self%pe_beg,self%pe_end,table_send(m)
 #endif
+          call MPI_Isend (table_send(m), 1, MPI_INTEGER, send_pe, COMM_TAG_1, mycomm, req(k), ierr)
+       end if
     enddo
+    if( k > 0) call MPI_Waitall (k, req, MPI_STATUSES_IGNORE, ierr)
 
-    ! total number of tuples will determine size of ids_to_add/positions_to_add
+   ! communicate new positions. data_send is an array of size n*(nd+1) times npes.
+   ! Each column j of data_send contains the tuple (id, x, y, ..) to be sent to pe=j.
+   ! Inversely, data_recv's column j contains tuples (id, x, y,..) received from pe=j.
+
+   ! total number of tuples will determine size of ids_to_add/positions_to_add
     ntuples_tot = 0
-    do m = self%pe_beg, self%pe_end
-       ntuples_tot = ntuples_tot + table_recv(m)
+    allocate(data_recv(max(maxval(table_recv),1)*3, 8))
+    data_recv  = 0
+
+    k = 0                                  !Number of MPI requests
+    do m = 1,8
+       recv_pe = send_list(m)
+       ndata = table_recv(m)*3
+       if(recv_pe /= _NULL_PE .and. ndata > 0)   then
+          k     = k+1
+          call MPI_Irecv (data_recv(:,m), ndata, MPI_REAL8, recv_pe, COMM_TAG_2, mycomm, req(k), ierr)
+          ntuples_tot = ntuples_tot + table_recv(m)
+#ifdef _DEBUG
+          write (stdlog(),*) 'recv ',m,k,ndata,recv_pe,shape(data_recv),ntuples_tot,nar_est
+#endif
+       end if
     enddo
+    do m = 1,8
+       send_pe = send_list(m)
+       ndata = table_send(m)*3
+       if(send_pe /= _NULL_PE .and. ndata > 0)   then
+          k     = k+1
+#ifdef _DEBUG
+          write (stdlog(),*) 'send ',m,k,ndata,send_pe,self%pe_beg,self%pe_end,nar_est
+#endif
+          call MPI_Isend (data_send(:,m), ndata, MPI_REAL8, send_pe, COMM_TAG_2, mycomm, req(k), ierr)
+       end if
+    enddo
+    if( k > 0) call MPI_Waitall (k, req, MPI_STATUSES_IGNORE, ierr)
 
-    allocate(positions_to_add(nd, ntuples_tot))
-    allocate(      ids_to_add(    ntuples_tot))
+    if(ntuples_tot > 0)  then
+       allocate(positions_to_add(nd, ntuples_tot))
+       allocate(      ids_to_add(    ntuples_tot))
+    end if
 
-    ! fill positions_to_add and ids_to_add.
+!   fill positions_to_add and ids_to_add.
     k = 0
-    do m = self%pe_beg, self%pe_end
-       ! get ids/positions coming from all pes
+    do m = 1,8
+      ! get ids/positions coming from all pes
+
+       recv_pe = send_list(m)
+       if(recv_pe == _NULL_PE)   CYCLE
+
        do n = 1, table_recv(m)
-          ! iterate over all ids/positions coming from pe=m
+         ! iterate over all ids/positions coming from pe=m
           el = (n-1)*(nd+1) + 1
           id = int(data_recv(el, m))
-          ! only add if id not already present in drfts
-          ! this can happen if a drifter meanders about 
-          ! the compute domain boundary
+         ! only add if id not already present in drfts
+         ! this can happen if a drifter meanders about
+         ! the compute domain boundary
           is_present = .false.
           do j = 1, drfts%np
              if(id == drfts%ids(j)) then
@@ -512,39 +642,80 @@ contains
           endif
        enddo
     enddo
-    
-    ! remove and add
-    if(irem > 0 .or. k > 0) then
-       write(notemsg, '(i4,a,i4,a)') irem, ' drifter(s) will be removed, ', k,' will be added'
+
+!! #ifdef _DEBUG
+! iow ! check total number of drifters to be added or removed across all PEs
+    glo_tran(1) = k
+    glo_tran(2) = irem
+    call mpp_sum(glo_tran,2)
+    if(glo_tran(1) /= glo_tran(2)) then
+       write(notemsg, '(a,i8,a,i8,a)') 'unbalanced drifter(s) across all PEs:',glo_tran(2),' to remove, but',glo_tran(1),' to add'
        call mpp_error(NOTE, notemsg)
-!!$       if(k>0) print *,'positions to add ', positions_to_add(:,1:k)
-!!$       if(irem>0) print *,'ids to remove: ', indices_to_remove(1:irem)
-    endif
-    call drifters_core_remove_and_add(drfts, indices_to_remove(1:irem), &
-         & ids_to_add(1:k), positions_to_add(:,1:k), ermsg)
-    if(ermsg/='') call mpp_error( FATAL, ermsg)
+    end if
+!! #endif
 
-#ifndef _USE_MPI
-    ! make sure unbuffered mpp_isend call returned before deallocating
-    call mpp_sync_self()
+ !   remove and add
+    if(irem > 0 .or. k > 0) then
+       write(notemsg, '(i4,a,i4,a,i6)') irem, ' drifter(s) will be removed, ', k,' were added on time step',drfts%it
+       call mpp_error(NOTE, notemsg)
+#ifdef _DEBUG
+! iow ! for debugging, stdout() to get output from each PE
+       if(k>0)    write(stdout(),*) 'itt, pe, ids to add :',drfts%it,self%pe,ids_to_add(1:k)
+       if(irem>0) write(stdout(),*) 'itt, pe, ids to remove :',drfts%it,self%pe,indices_to_remove(1:irem)
 #endif
+       call drifters_core_remove_and_add(drfts, indices_to_remove(1:irem), &
+            & ids_to_add(1:k), positions_to_add(:,1:k), ermsg)
+       if(ermsg/='') call mpp_error( FATAL, ermsg)
+    endif
 
-    deallocate(ids_to_add)
-    deallocate(positions_to_add)
+    if(allocated(ids_to_add))       deallocate(ids_to_add)
+    if(allocated(positions_to_add)) deallocate(positions_to_add)
 
-    deallocate(iadd)
-    deallocate(table_recv)
-    deallocate(table_send)
     deallocate(data_recv)
     deallocate(data_send)
     deallocate(indices_to_remove)
 
+    call mpp_clock_end(id_trans)
+
+  contains
+    subroutine enlarge_buffers
+      implicit none
+
+      real   , allocatable, dimension(:,:)  :: data_send_save
+      integer, allocatable, dimension(:)    :: indices_to_remove_save
+
+      write(stdlog(), '(a,i4,a,i4,a)') 'drifters_comm_update: Enlarge buffers (', &
+                  & nar_est,' ->', nar_est*2,').'
+
+      allocate(data_send_save(1:size(data_send,1),8))
+      data_send_save = data_send
+      deallocate(data_send)
+
+      allocate(indices_to_remove_save(1:size(indices_to_remove)))
+      indices_to_remove_save = indices_to_remove
+      deallocate(indices_to_remove)
+
+      nar_est = nar_est*2
+
+      allocate(data_send(nar_est*(1+nd),8))
+      data_send(1:size(data_send_save,1),:) = data_send_save
+      deallocate(data_send_save)
+
+      allocate(indices_to_remove(nar_est))
+      indices_to_remove(1:size(indices_to_remove_save)) = indices_to_remove_save
+      deallocate(indices_to_remove_save)
+
+      return
+    end subroutine enlarge_buffers
+
 #endif
-! end of parallel code
+ ! end of parallel code
 
-  end subroutine drifters_comm_update
+ end subroutine drifters_comm_update
 
-!===============================================================================
+ !===============================================================================
+
+
   subroutine drifters_comm_gather(self, drfts, dinp, &
        & lons, lats, do_save_lonlat, &
        & filename, &

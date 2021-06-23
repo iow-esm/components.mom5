@@ -518,18 +518,24 @@ ierr = check_nml_error(io_status,'ocean_mixdownslope_nml')
 
   id_topog_step_1 = register_static_field ('ocean_model', 'topog_step_1', Grd%tracer_axes(1:2), &
        'topog_step_1', 'dimensionless', missing_value=missing_value, range=(/-1.0,1.0/))
+!kk  Change order of dimensions for topog_step correct????
+
+!kk  call diagnose_2d(Time, Grd, id_topog_step_1, topog_step(1,:,:))
   call diagnose_2d(Time, Grd, id_topog_step_1, topog_step(:,:,1))
 
   id_topog_step_2 = register_static_field ('ocean_model', 'topog_step_2', Grd%tracer_axes(1:2), &
        'topog_step_2', 'dimensionless', missing_value=missing_value, range=(/-1.0,1.0/))
+!kk  call diagnose_2d(Time, Grd, id_topog_step_2, topog_step(2,:,:))
   call diagnose_2d(Time, Grd, id_topog_step_2, topog_step(:,:,2))
 
   id_topog_step_3 = register_static_field ('ocean_model', 'topog_step_3', Grd%tracer_axes(1:2), &
        'topog_step_3', 'dimensionless', missing_value=missing_value, range=(/-1.0,1.0/))
+!kk  call diagnose_2d(Time, Grd, id_topog_step_3, topog_step(3,:,:))
   call diagnose_2d(Time, Grd, id_topog_step_3, topog_step(:,:,3))
 
   id_topog_step_4 = register_static_field ('ocean_model', 'topog_step_4', Grd%tracer_axes(1:2), &
        'topog_step_4', 'dimensionless', missing_value=missing_value, range=(/-1.0,1.0/))
+!kk  call diagnose_2d(Time, Grd, id_topog_step_4, topog_step(4,:,:))
   call diagnose_2d(Time, Grd, id_topog_step_4, topog_step(:,:,4))
 
 
@@ -741,7 +747,8 @@ subroutine mixdownslope (Time, Thickness, T_prog, Dens, index_temp, index_salt)
 
                           if(n==1) then 
                              kup_ex(i,j,m) = kmtij
-                             delta = rho_ex(i,j,kmtij)-rho_ex(iip1,jjq1,kmtij)
+! TN 20130326                             delta = rho_ex(i,j,kmtij)-rho_ex(iip1,jjq1,kmtij)
+                             delta = delta_rho(n)
                           else 
                              delta = delta_rho(n)
                           endif 
@@ -934,7 +941,7 @@ subroutine mixdownslope (Time, Thickness, T_prog, Dens, index_temp, index_salt)
          do k=1,nk
             area_k(:,:) = Grd%dat(:,:)*Grd%tmask(:,:,k)  
             tend_mix(:,:,k) = dtime*tend_mix(:,:,k)*area_k(:,:)*T_prog(nt)%conversion
-            write(stdoutunit,'(a,i2,a,i2,a,es24.17)') 'tend_mix(',nt,',',k,') = ',&
+            write(stdoutunit,'(a,i2,a,i3,a,es24.17)') 'tend_mix(',nt,',',k,') = ',&
                  mpp_global_sum(Dom%domain2d,tend_mix(:,:,k))
          enddo
          write(stdoutunit,'(a,i2,a,es24.17)') &
