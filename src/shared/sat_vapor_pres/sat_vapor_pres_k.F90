@@ -1351,6 +1351,8 @@
      tmp = temp(i)-tminl
      ind = int(dtinvl*(tmp+tepsl))
      if (ind < 0 .or. ind >= table_siz)  then
+       write(*,*) "Temperature ",temp(i)," out of range at index ",i
+      ! print *, "Bad Temperature print ",temp(i)," out of range at index ",i
        nbad = nbad+1
      else
        del = tmp-dtres*real(ind)

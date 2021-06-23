@@ -1,0 +1,11 @@
+# template for the Intel fortran compiler version 8
+# typical use with mkmf
+# mkmf -t template.ifc -c"-Duse_libMPI -Duse_netCDF" path_names /usr/local/include
+# -traceback
+FFLAGS = -O3 -xCORE-AVX512 -r8 -fp-model precise -align array64byte -g -traceback -I/sw/dataformats/netcdf/4.6.3/skl/intel.18/include/ 
+CPPFLAGS = -O3 -xCORE-AVX512 -fp-model precise -g -traceback -I/sw/dataformats/netcdf/4.6.3/skl/intel.18/include/
+FC = mpiifort
+LD = mpiifort
+LDFLAGS = -g -traceback -L/sw/dataformats/netcdf/4.6.3/skl/intel.18/lib -lnetcdf -lnetcdff
+CC = mpiicc
+

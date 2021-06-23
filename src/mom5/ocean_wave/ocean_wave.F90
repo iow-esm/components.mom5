@@ -177,7 +177,7 @@ real     :: stokes_drift, stokes_limit, r_ice   ! buffers for Stokes drift calcu
 logical  :: calc_stokes_drift = .false.         ! choose monochromatic wave approximation for Stokes drift 
 real     :: stokes_fac   = 1.0                  ! factor to enhance Stokes drift according to wave spectrum 
 real     :: spread_loss  = 1.0                  ! loss factor of Stokes drift due to directional spread 
-real     :: crit_ice     = 50.0                 ! crit. ice mass [kg/m²] for reduction of Stokes drift
+real     :: crit_ice     = 50.0                 ! crit. ice mass [kg/mï¿½] for reduction of Stokes drift
 real     :: stokes_p_lim = 1.0                  ! limiting wave freq. [sec] (small, high freq. waves) 
 real     :: stokes_a_lim = 0.005365             ! Donelan wave spectrum asymptotic limit of Stokes drift
                                                 ! damp Stokes drift exponentially to stokes_a_lim/wave_freq
@@ -393,7 +393,7 @@ end subroutine ocean_wave_init
 ! time step the wave model
 ! </DESCRIPTION>
 !
-subroutine ocean_wave_model(Time, Waves, Ice_ocean_boundary)
+subroutine ocean_wave_model(Time, Waves, Ice_ocean_boundary)   
   type(ocean_time_type),          intent(in)    :: Time 
   type(ocean_wave_type),          intent(inout) :: Waves
   type(ice_ocean_boundary_type),  intent(in)    :: Ice_ocean_boundary
@@ -419,8 +419,13 @@ subroutine ocean_wave_model(Time, Waves, Ice_ocean_boundary)
   windx = 0.0
   windy = 0.0
 
+#IFDEF COUP_OAS !sandra
+  wrk1(isc:iec,jsc:jec)=Ice_ocean_boundary%u_wind(isc:iec,jsc:jec)
+  wrk2(isc:iec,jsc:jec)=Ice_ocean_boundary%v_wind(isc:iec,jsc:jec)
+#ELSE
   call data_override('OCN', 'u_bot', wrk1, Time%model_time )
   call data_override('OCN', 'v_bot', wrk2, Time%model_time )
+#ENDIF
 
   do j=jsc,jec
      do i=isc,iec

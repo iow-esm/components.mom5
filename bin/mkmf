@@ -469,4 +469,4 @@ if( $suffix eq '.a' ) {
 close MAKEFILE;
 print " $mkfile is ready.\n";
 
-exec 'make', '-f', $mkfile if $opt_x;
+exec 'make', '-j', '8', '-f', $mkfile if $opt_x;

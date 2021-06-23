@@ -15,8 +15,7 @@ set pathnames     = $code_dir/path_names_$type        # path to file containing 
 set mppnccombine  = $root/bin/mppnccombine.$platform  # path to executable mppnccombine
 set mkmfTemplate  = $root/bin/mkmf.template.$platform # path to template for your platform
 set mkmf          = $root/bin/mkmf                    # path to executable mkmf
-set cppDefs  = ( "-Duse_netCDF  -Duse_netCDF3 -Duse_libMPI -DLAND_BND_TRACERS -DOVERLOAD_C8 -DOVERLOAD_C4 -DOVERLOAD_R4" )
-
+set cppDefs  = ( "-Duse_netCDF  -Duse_netCDF3 -Duse_libMPI -DLAND_BND_TRACERS -DOVERLOAD_C8 -DOVERLOAD_C4 -DOVERLOAD_R4")
 #
 # Users must ensure the correct environment file exists for their platform.
 #
@@ -30,7 +29,7 @@ source $root/bin/environs.$platform  # environment variables and loadable module
 #NOTE: On some platforms you may need to specify the location for netcdf.h and libnetcdf.a
 #      by modifying the following -I and -L
   if (  ! -f $mppnccombine ) then
-    cc -O -o $mppnccombine -I/usr/local/include -L/usr/local/lib $code_dir/postprocessing/mppnccombine/mppnccombine.c -lnetcdf
+    cc -O -o $mppnccombine -I/usr/local/include -L/usr/local/lib $code_dir/postprocessing/mppnccombine/mppnccombine.c -lnetcdf 
   endif
 
 

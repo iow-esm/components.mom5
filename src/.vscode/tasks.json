@@ -1,0 +1,112 @@
+{
+    // See https://go.microsoft.com/fwlink/?LinkId=733558
+    // for the documentation about the tasks.json format
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "build_MOM5_haumea",
+            "type": "shell",
+            "command": "cd /media/d/hagen/iow/climate/coupled_model/IOW_ESM/components/MOM5; rsync -r -i -u src haumea1:/data/hr275/IOW_ESM/components/MOM5/.; ssh -t haumea1 'cd /data/hr275/IOW_ESM/components/MOM5/; srun -t 01:00:00 -p compute -N1 --tasks-per-node 1 --pty bash -c \"source ~/.bash_profile; source build_fast.sh\"'",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            },
+            "problemMatcher": {
+                "owner": "ifort",
+                "fileLocation": [
+                    "relative",
+                    "${workspaceRoot}"
+                ],
+                "pattern": {
+                    "regexp": "^/data/hr275/IOW_ESM/components/MOM5/src/(.*?)\\((.*?)\\): (warning|error) (.*)",
+                    "file": 1,
+                    "line": 2,
+                    "severity": 3,
+                    "message": 4
+                }
+            }
+        },
+        {
+            "label": "build_MOM5",
+            "type": "shell",
+            "command": "cd /media/d/hagen/iow/climate/coupled_model/IOW_ESM/components/MOM5; rsync -r --update -i src mvkradtk@blogin:/scratch/usr/mvkradtk/IOW_ESM/components/MOM5/.; ssh -t mvkradtk@blogin 'cd /scratch/usr/mvkradtk/IOW_ESM/components/MOM5/; source build_fast.sh'",
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            },
+            //"problemMatcher": "$msCompile"
+            "problemMatcher": {
+                "owner": "ifort",
+                "fileLocation": ["relative", "${workspaceRoot}"],
+                "pattern": {
+                    "regexp": "^/scratch/usr/mvkradtk/IOW_ESM/components/MOM5/src/(.*?)\\((.*?)\\): (warning|error) (.*)",
+                    "file": 1,
+                    "line": 2,
+                    "severity": 3,
+                    "message": 4
+                }
+            }
+        },
+        {
+            "label": "build_MOM5_debug",
+            "type": "shell",
+            "command": "cd /media/d/hagen/iow/climate/coupled_model/IOW_ESM/components/MOM5; rsync -r --update -i src mvkradtk@blogin:/scratch/usr/mvkradtk/IOW_ESM/components/MOM5/.; ssh -t mvkradtk@blogin 'cd /scratch/usr/mvkradtk/IOW_ESM/components/MOM5/; source build_debug_fast.sh'",
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            },
+            //"problemMatcher": "$msCompile"
+            "problemMatcher": {
+                "owner": "ifort",
+                "fileLocation": ["relative", "${workspaceRoot}"],
+                "pattern": {
+                    "regexp": "^/scratch/usr/mvkradtk/IOW_ESM/components/MOM5/src/(.*?)\\((.*?)\\): (warning|error) (.*)",
+                    "file": 1,
+                    "line": 2,
+                    "severity": 3,
+                    "message": 4
+                }
+            }
+        },
+        {
+            "label": "build_flux_calculator_local",
+            "type": "shell",
+            "command": "cd /media/d/hagen/iow/climate/coupled_model/IOW_ESM/components/MOM5; source build_local.sh",
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            },
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "run_IOW_ESM_haumea",
+            "type": "shell",
+            "command": "ssh -t haumea1 'cd /data/hr275/IOW_ESM/scripts/run; source ~/.bash_profile; sbatch jobscript'",
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            },
+            "problemMatcher": []
+        }
+    ]
+}

@@ -820,6 +820,7 @@ subroutine flux_exchange_init ( Time, Atm, Land, Ice, Ocean, Ocean_state,&
         call setup_xmap(xmap_sfc, (/ 'ATM', 'OCN', 'LND' /),   &
              (/ Atm%Domain, Ice%Domain, Land%Domain /),        &
              "INPUT/grid_spec.nc", Atm%grid)
+! sandra test not done 18122018       write(*,*) "xgrid i ", xmap_sfc%x2(1)%i
         ! exchange grid indices
         X1_GRID_ATM = 1; X1_GRID_ICE = 2; X1_GRID_LND = 3;
         call generate_sfc_xgrid( Land, Ice )
@@ -862,6 +863,9 @@ subroutine flux_exchange_init ( Time, Atm, Land, Ice, Ocean, Ocean_state,&
         allocate( atmos_ice_boundary%u_star(is:ie,js:je,kd) )
         allocate( atmos_ice_boundary%t_flux(is:ie,js:je,kd) )
         allocate( atmos_ice_boundary%q_flux(is:ie,js:je,kd) )
+#IFDEF COUP_OAS !sandra
+        allocate( atmos_ice_boundary%lh_flux(is:ie,js:je,kd) )
+#ENDIF
         allocate( atmos_ice_boundary%lw_flux(is:ie,js:je,kd) )
         allocate( atmos_ice_boundary%sw_flux_vis_dir(is:ie,js:je,kd) )
         allocate( atmos_ice_boundary%sw_flux_vis_dif(is:ie,js:je,kd) )
@@ -880,6 +884,9 @@ subroutine flux_exchange_init ( Time, Atm, Land, Ice, Ocean, Ocean_state,&
         atmos_ice_boundary%u_star=0.0
         atmos_ice_boundary%t_flux=0.0
         atmos_ice_boundary%q_flux=0.0
+#IFDEF COUP_OAS !sandra
+        atmos_ice_boundary%lh_flux=0.0
+#ENDIF
         atmos_ice_boundary%lw_flux=0.0
         atmos_ice_boundary%sw_flux_vis_dir=0.0
         atmos_ice_boundary%sw_flux_vis_dif=0.0
@@ -1037,6 +1044,10 @@ subroutine flux_exchange_init ( Time, Atm, Land, Ice, Ocean, Ocean_state,&
     allocate( ice_ocean_boundary%calving_hflx  (is:ie,js:je) ) ; ice_ocean_boundary%calving_hflx = 0.0
     allocate( ice_ocean_boundary%p        (is:ie,js:je) ) ; ice_ocean_boundary%p = 0.0
     allocate( ice_ocean_boundary%mi       (is:ie,js:je) ) ; ice_ocean_boundary%mi = 0.0
+#IFDEF COUP_OAS !sandra
+    allocate( ice_ocean_boundary%u_wind       (is:ie,js:je) ) ; ice_ocean_boundary%u_wind = 0.0
+    allocate( ice_ocean_boundary%v_wind       (is:ie,js:je) ) ; ice_ocean_boundary%v_wind = 0.0
+#ENDIF
 
 !
 ! allocate fields for extra tracers
@@ -2141,15 +2152,17 @@ end subroutine sfc_boundary_layer
 !  </INOUT>
 !
 subroutine flux_down_from_atmos (Time, Atm, Land, Ice, &
-     Atmos_boundary, Land_boundary, Ice_boundary )
+     Atmos_boundary, Land_boundary, Ice_boundary,ice_ocean_boundary,Time_start,Timet, couple_flux_calculator )  ! for coupling sandra
 
-  type(time_type),       intent(in) :: Time
+  type(time_type),       intent(in) :: Time,Time_start,Timet ! for coupling sandra
   type(atmos_data_type), intent(inout) :: Atm
   type(land_data_type),  intent(in) :: Land
   type(ice_data_type),   intent(in) :: Ice
   type(land_ice_atmos_boundary_type),intent(in) :: Atmos_boundary
   type(atmos_land_boundary_type),    intent(inout):: Land_boundary
   type(atmos_ice_boundary_type),     intent(inout):: Ice_boundary
+  type(ice_ocean_boundary_type),     intent(inout):: ice_ocean_boundary  ! for coupling sandra
+  logical,               intent(in) :: couple_flux_calculator
 
   real, dimension(n_xgrid_sfc) :: ex_flux_sw, ex_flux_lwd, &
        ex_flux_sw_dir,  &
@@ -2311,9 +2324,7 @@ subroutine flux_down_from_atmos (Time, Atm, Land, Ice, &
   deallocate ( ex_albedo_nir_dif_fix )
 !----- compute net longwave flux (down-up) -----
   ! (note: lw up already in ex_flux_lw)
-
   ex_flux_lw = ex_flux_lwd - ex_flux_lw
-
 !-----------------------------------------------------------------------
 !----- adjust fluxes for implicit dependence on atmosphere ----
 
@@ -2473,7 +2484,6 @@ subroutine flux_down_from_atmos (Time, Atm, Land, Ice, &
 
 !-----------------------------------------------------------------------
 !---- output fields on the ice grid -------
-
   call get_from_xgrid (Ice_boundary%t_flux,   'OCN', ex_flux_t,    xmap_sfc)
   call get_from_xgrid (Ice_boundary%q_flux,   'OCN', ex_flux_tr(:,isphum), xmap_sfc)
   call get_from_xgrid (Ice_boundary%sw_flux_vis_dir,  'OCN', ex_flux_sw_vis_dir,   xmap_sfc)
@@ -2490,12 +2500,13 @@ subroutine flux_down_from_atmos (Time, Atm, Land, Ice, &
   call get_from_xgrid (Ice_boundary%drdt,     'OCN', ex_drdt_surf, xmap_sfc)
   call get_from_xgrid (Ice_boundary%u_flux,   'OCN', ex_flux_u,    xmap_sfc)
   call get_from_xgrid (Ice_boundary%v_flux,   'OCN', ex_flux_v,    xmap_sfc)
-  call get_from_xgrid (Ice_boundary%u_star,   'OCN', ex_u_star,    xmap_sfc)
-  call get_from_xgrid (Ice_boundary%coszen,   'OCN', ex_coszen,    xmap_sfc)
   call get_from_xgrid (Ice_boundary%p,        'OCN', ex_slp,       xmap_sfc) ! mw mod
-
   call get_from_xgrid (Ice_boundary%lprec,    'OCN', ex_lprec,     xmap_sfc)
   call get_from_xgrid (Ice_boundary%fprec,    'OCN', ex_fprec,     xmap_sfc)
+  call get_from_xgrid (Ice_boundary%u_star,   'OCN', ex_u_star,    xmap_sfc)
+
+  call get_from_xgrid (Ice_boundary%coszen,   'OCN', ex_coszen,    xmap_sfc)
+
 !!$  if (do_area_weighted_flux) then
 !!$     where (AREA_ATM_SPHERE /= 0)
 !!$        Ice_boundary%lprec = Ice_boundary%lprec * AREA_ATM_MODEL/AREA_ATM_SPHERE
@@ -2516,17 +2527,22 @@ subroutine flux_down_from_atmos (Time, Atm, Land, Ice, &
            ex_gas_fluxes%bc(n)%field(m)%values, xmap_sfc)
     enddo  !} m
   enddo  !} n
+#IFDEF OASIS_IOW_ESM
+  if (couple_flux_calculator) then
+    write(*,*) 'calling oas_exchange_fields'
+    call oas_exchange_fields(Ice,Ice_boundary,ice_ocean_boundary,Time_start,Timet)
+  endif
+#ENDIF
+#IFDEF COUP_OAS !sandra
+!  write(*,*) "start oasis receive in flux exchange"
+  write(*,*) 'really calling oas_receive_field'
+  call oas_receive_field(Ice,Ice_boundary,ice_ocean_boundary,Time_start,Timet)
+#ELSE
 
 !Balaji: data_override calls moved here from coupler_main
-  call data_override('ICE', 'u_flux', Ice_boundary%u_flux,  Time)
-  call data_override('ICE', 'v_flux', Ice_boundary%v_flux,  Time)
-  call data_override('ICE', 't_flux', Ice_boundary%t_flux,  Time)
-  call data_override('ICE', 'q_flux', Ice_boundary%q_flux,  Time)
-  call data_override('ICE', 'lw_flux',Ice_boundary%lw_flux, Time)
-  call data_override('ICE', 'lw_flux_dn',Ice_boundary%lw_flux, Time, override=ov)
-  if (ov) then
-    Ice_boundary%lw_flux = Ice_boundary%lw_flux - stefan*Ice%t_surf**4
-  endif
+!  if (ov) then
+!    Ice_boundary%lw_flux = Ice_boundary%lw_flux - stefan*Ice%t_surf**4
+!  endif
   call data_override('ICE', 'sw_flux_nir_dir',Ice_boundary%sw_flux_nir_dir, Time)
   call data_override('ICE', 'sw_flux_vis_dir',Ice_boundary%sw_flux_vis_dir, Time)
   call data_override('ICE', 'sw_flux_nir_dif',Ice_boundary%sw_flux_nir_dif, Time, override=ov)
@@ -2547,13 +2563,27 @@ subroutine flux_down_from_atmos (Time, Atm, Land, Ice, &
   if (ov) then
     Ice_boundary%sw_flux_nir_dif = Ice_boundary%sw_flux_nir_dif*(1-Ice%albedo_nir_dif)
   endif
+
   call data_override('ICE', 'lprec',  Ice_boundary%lprec,   Time)
   call data_override('ICE', 'fprec',  Ice_boundary%fprec,   Time)
+  call data_override('ICE', 'lw_flux',Ice_boundary%lw_flux, Time)
+  call data_override('ICE', 'lw_flux_dn',Ice_boundary%lw_flux, Time, override=ov)
+  call data_override('ICE', 't_flux', Ice_boundary%t_flux,  Time)
+  if (ov) then
+    Ice_boundary%lw_flux = Ice_boundary%lw_flux - stefan*Ice%t_surf**4
+  endif
+  call data_override('ICE', 'q_flux', Ice_boundary%q_flux,  Time)
+  call data_override('ICE', 'p',      Ice_boundary%p,       Time)
+  call data_override('ICE', 'u_flux', Ice_boundary%u_flux,  Time)
+  call data_override('ICE', 'v_flux', Ice_boundary%v_flux,  Time)
+
+#ENDIF
+
   call data_override('ICE', 'dhdt',   Ice_boundary%dhdt,    Time)
   call data_override('ICE', 'dedt',   Ice_boundary%dedt,    Time)
   call data_override('ICE', 'drdt',   Ice_boundary%drdt,    Time)
+
   call data_override('ICE', 'coszen', Ice_boundary%coszen,  Time)
-  call data_override('ICE', 'p',      Ice_boundary%p,       Time)
 
   do n = 1, Ice_boundary%fluxes%num_bcs  !{
     do m = 1, Ice_boundary%fluxes%bc(n)%num_fields  !{
@@ -3480,7 +3510,6 @@ subroutine flux_up_to_atmos ( Time, Land, Ice, Land_Ice_Atmos_Boundary, Land_bou
      call get_from_xgrid (diag_atm, 'ATM', ex_flux_lw, xmap_sfc)
      used = send_data ( id_r_flux, diag_atm, Time )
   endif
-
   !------- tracer fluxes ------------
   ! tr_mol_flux diagnostic will be correct for co2 tracer only. 
   ! will need update code to use correct molar mass for tracers other than co2

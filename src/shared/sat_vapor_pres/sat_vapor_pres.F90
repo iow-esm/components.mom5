@@ -579,7 +579,6 @@ contains
    if (.not.module_is_initialized) call sat_vapor_pres_init
 
    call lookup_es_k(temp, esat, nbad)
-
    if ( nbad == 0 ) then
      if(present(err_msg)) err_msg = ''
    else

@@ -1,0 +1,18 @@
+# template for the Intel fortran compiler version 8
+# typical use with mkmf
+# mkmf -t template.ifc -c"-Duse_libMPI -Duse_netCDF" path_names /usr/local/include
+# pkg-config --cflags-only-I ompi-fort
+CPPFLAGS =  -I/usr/include -I${NETCDF_INC} -I/sw/comp/openmpi/OS_13.2/2.0.1/ifort-2017.1.132/include -I/sw/comp/openmpi/OS_13.2/2.0.1/ifort-2017.1.132/lib64
+FFLAGS = -O2 -ip -xHost -align all -IPF-fp-relaxed -assume byterecl -r8
+# debug
+#FFLAGS = -O1 -traceback -ip -xHost -align all -IPF-fp-relaxed -assume byterecl -r8
+# repro
+#FFLAGS = -fno-alias -automatic -safe-cray-ptr -ftz -assume byterecl -i4 -r8 -nowarn -O2 -debug minimal -fp-model precise -override-limits
+FC = ifort
+LD = ifort
+CC = icc
+# pkg-config --libs-only-L ompi-fort
+# pkg-config --libs-only-l ompi-fort
+LDFLAGS = -Wl,-rpath,${NETCDF_LIB},-rpath,/sw/data/hdf5/OS_13.2/1.8.18/intel_2017.1.132_threadsafe/lib64,-rpath,/sw/comp/openmpi/OS_13.2/2.0.1/ifort-2017.1.132/lib64,-rpath,/opt/torque/lib64 -L${NETCDF_LIB} -L/sw/data/hdf5/OS_13.2/1.8.18/intel_2017.1.132_threadsafe/lib64 -L/sw/comp/openmpi/OS_13.2/2.0.1/ifort-2017.1.132/lib64 -L/opt/torque/lib64 -lnetcdff -lnetcdf -lmpi_usempif08 -lmpi_usempi_ignore_tkr -lmpi_mpifh -lmpi
+CFLAGS = -D__IFC
+

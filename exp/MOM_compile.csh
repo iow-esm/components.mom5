@@ -6,10 +6,12 @@
 #module load mpt/1.26
 
 set echo
-set platform      = ifc           # A unique identifier for your platfo
+set platform      = IOW_ESM_${IOW_ESM_COMPILE_MODE}  # A unique identifier for your platform
                                   # This corresponds to the mkmf templates in $root/bin dir.
 set type          = MOM_SIS       # Type of the experiment
 set help = 0
+
+set coupled       = 1             # 1: in case of COSMO_clm coupled to MOM_SIS
 
 set argv = (`getopt -u -o h -l type: -l platform:  -l help  --  $*`)
 while ("$argv[1]" != "--")
@@ -51,7 +53,7 @@ set executable    = $root/exec/$platform/$type/fms_$type.x      # executable cre
 set mppnccombine  = $root/bin/mppnccombine.$platform  # path to executable mppnccombine
 set mkmfTemplate  = $root/bin/mkmf.template.$platform # path to template for your platform
 set mkmf          = $root/bin/mkmf                    # path to executable mkmf
-set cppDefs  = ( "-Duse_netCDF -Duse_netCDF4 -Duse_libMPI -DUSE_OCEAN_BGC -DENABLE_ODA -DSPMD -DLAND_BND_TRACERS" )
+set cppDefs  = ( "-Duse_netCDF -Duse_netCDF4 -Duse_libMPI -DUSE_OCEAN_BGC -DENABLE_ODA -DSPMD -DLAND_BND_TRACERS ${IOW_ESM_CPPDEFS}")
 #On Altrix systems you may include "-Duse_shared_pointers -Duse_SGI_GSM" in cppDefs for perfomance.
 #These are included in the GFDL configuration of the model.
   
@@ -78,7 +80,7 @@ source $root/bin/environs.$platform  # environment variables and loadable module
 #  endif
 
 set mkmf_lib = "$mkmf -f -m Makefile -a $code_dir -t $mkmfTemplate"
-set lib_include_dirs = "$root/include $code_dir/shared/include $code_dir/shared/mpp/include"
+set lib_include_dirs = "$root/include $code_dir/shared/include $code_dir/shared/mpp/include -I${IOW_ESM_ROOT}/components/OASIS3-MCT/oasis3-mct/IOW_ESM_${IOW_ESM_COMPILE_MODE}/lib"
 
 source ./FMS_compile.csh
 if ( $status ) exit $status
@@ -100,6 +102,12 @@ if( $type == MOM_SIS) then
     cd $root/exp
     source ./atmos_null_compile.csh
     if ( $status ) exit $status
+
+    if ($coupled == 1) then
+      cd $root/exp
+      source ./oasis_compile.csh
+      if ( $status ) exit $status
+    endif
 endif
 if( $type == EBM) then
     cd $root/exp
@@ -142,8 +150,8 @@ if( $type == MOM_solo ) then
     set libs = "$executable:h:h/lib_ocean/lib_ocean.a $executable:h:h/lib_FMS/lib_FMS.a"
 else if( $type == MOM_SIS ) then
     set srcList = ( coupler )
-    set includes = "-I$executable:h:h/lib_FMS -I$executable:h:h/lib_ocean -I$executable:h:h/lib_ice -I$executable:h:h/lib_atmos_null -I$executable:h:h/lib_land_null"
-    set libs = "$executable:h:h/lib_ocean/lib_ocean.a $executable:h:h/lib_ice/lib_ice.a $executable:h:h/lib_atmos_null/lib_atmos_null.a $executable:h:h/lib_land_null/lib_land_null.a $executable:h:h/lib_FMS/lib_FMS.a"
+    set includes = "-I$executable:h:h/lib_FMS -I$executable:h:h/lib_ocean -I$executable:h:h/lib_ice  -I${IOW_ESM_ROOT}/components/OASIS3-MCT/oasis3-mct/IOW_ESM_${IOW_ESM_COMPILE_MODE}/build/lib/mct -I${IOW_ESM_ROOT}/components/OASIS3-MCT/oasis3-mct/IOW_ESM_${IOW_ESM_COMPILE_MODE}/build/lib/psmile.MPI1 -I${IOW_ESM_ROOT}/components/OASIS3-MCT/oasis3-mct/IOW_ESM_${IOW_ESM_COMPILE_MODE}/build/lib/scrip -I${IOW_ESM_ROOT}/components/OASIS3-MCT/oasis3-mct/IOW_ESM_${IOW_ESM_COMPILE_MODE}/build/lib/mctdir -I${IOW_ESM_ROOT}/components/OASIS3-MCT/oasis3-mct/IOW_ESM_${IOW_ESM_COMPILE_MODE}/lib -I$executable:h:h/lib_oasis -I$executable:h:h/lib_atmos_null -I$executable:h:h/lib_land_null"
+    set libs = "$executable:h:h/lib_oasis/lib_oasis.a $executable:h:h/lib_ocean/lib_ocean.a $executable:h:h/lib_ice/lib_ice.a $executable:h:h/lib_atmos_null/lib_atmos_null.a ${IOW_ESM_ROOT}/components/OASIS3-MCT/oasis3-mct/IOW_ESM_${IOW_ESM_COMPILE_MODE}/lib/libpsmile.MPI1.a ${IOW_ESM_ROOT}/components/OASIS3-MCT/oasis3-mct/IOW_ESM_${IOW_ESM_COMPILE_MODE}/lib/libmct.a ${IOW_ESM_ROOT}/components/OASIS3-MCT/oasis3-mct/IOW_ESM_${IOW_ESM_COMPILE_MODE}/lib/libmpeu.a ${IOW_ESM_ROOT}/components/OASIS3-MCT/oasis3-mct/IOW_ESM_${IOW_ESM_COMPILE_MODE}/lib/libscrip.a $executable:h:h/lib_land_null/lib_land_null.a $executable:h:h/lib_FMS/lib_FMS.a"
 else if( $type == EBM ) then
     set srcList = ( coupler )
     set includes = "-I$executable:h:h/lib_FMS -I$executable:h:h/lib_ocean -I$executable:h:h/lib_ice -I$executable:h:h/lib_atmos_ebm  -I$executable:h:h/lib_land_lad"
@@ -161,8 +169,8 @@ else if( $type == ICCM ) then
     set includes = "-I$executable:h:h/lib_FMS -I$executable:h:h/lib_ocean -I$executable:h:h/lib_ice -I$executable:h:h/lib_atmos_bg -I$executable:h:h/lib_atmos_phys -I$executable:h:h/lib_land_lad" 
     set libs = "$executable:h:h/lib_ocean/lib_ocean.a $executable:h:h/lib_ice/lib_ice.a $executable:h:h/lib_atmos_bg/lib_atmos_bg.a $executable:h:h/lib_atmos_phys/lib_atmos_phys.a $executable:h:h/lib_land_lad/lib_land_lad.a $executable:h:h/lib_FMS/lib_FMS.a"
 endif
-$mkmf_exec -o "$includes" -l "$libs"  $srcList
-make
+$mkmf_exec -o "$includes" -l "$libs" -c "$cppDefs" $srcList
+${IOW_ESM_MAKE}
 if( $status ) then
     echo "Make failed to create the $type executable"
     exit 1

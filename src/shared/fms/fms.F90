@@ -327,9 +327,9 @@ subroutine fms_init (localcomm )
     module_is_initialized = .true.
 !---- initialize mpp routines ----
     if(present(localcomm)) then
-       call mpp_init(localcomm=localcomm)
+       call mpp_init(localcomm=localcomm) 
     else
-       call mpp_init()
+       call mpp_init()  
     endif
     call mpp_domains_init
     call fms_io_init

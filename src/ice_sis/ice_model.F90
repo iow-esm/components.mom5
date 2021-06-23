@@ -140,6 +140,11 @@ module ice_model_mod
      real, dimension(:,:,:), pointer :: data    =>NULL()
      integer                         :: xtype
      type(coupler_3d_bc_type)        :: fluxes     ! array of fluxes used for additional tracers
+#IFDEF COUP_OAS !sandra
+     real, dimension(:,:,:), pointer :: lh_flux  =>NULL() ! for coupling latent heat 
+     real, dimension(:,:), pointer :: u_wind  =>NULL()  ! for wave model
+     real, dimension(:,:), pointer :: v_wind  =>NULL()  ! for wave model
+#ENDIF
   end type
 
   type :: land_ice_boundary_type
@@ -194,6 +199,28 @@ contains
 
     call mpp_clock_begin(iceClock)
     call mpp_clock_begin(iceClock3)
+
+#IFDEF COUP_OAS !sandra
+    call update_ice_model_fast_old (Ice, Atmos_boundary%fluxes,  &
+                                         Atmos_boundary%u_flux,  &
+                                         Atmos_boundary%v_flux,  &
+                                         Atmos_boundary%u_star,  &
+                                         Atmos_boundary%sw_flux_nir_dir, &
+                                         Atmos_boundary%sw_flux_nir_dif, &
+                                         Atmos_boundary%sw_flux_vis_dir, &
+                                         Atmos_boundary%sw_flux_vis_dif, &
+                                         Atmos_boundary%lw_flux, &
+                                         Atmos_boundary%t_flux,  &
+                                         Atmos_boundary%q_flux,  &
+                                         Atmos_boundary%lh_flux, &   !inserted for coupling latent heat
+                                         Atmos_boundary%dhdt,    &
+                                         Atmos_boundary%dedt,    &
+                                         Atmos_boundary%drdt,    &
+                                         Atmos_boundary%lprec,   &
+                                         Atmos_boundary%fprec,   &
+                                         Atmos_boundary%coszen,  &
+                                         Atmos_boundary%p        )
+#ELSE
     call update_ice_model_fast_old (Ice, Atmos_boundary%fluxes,  &
                                          Atmos_boundary%u_flux,  &
                                          Atmos_boundary%v_flux,  &
@@ -212,6 +239,8 @@ contains
                                          Atmos_boundary%fprec,   &
                                          Atmos_boundary%coszen,  &
                                          Atmos_boundary%p        )
+#ENDIF
+
     call mpp_clock_end(iceClock3)
     call mpp_clock_end(iceClock)
 
@@ -735,7 +764,7 @@ contains
   !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~!
   subroutine update_ice_model_fast_old (Ice, Atmos_boundary_fluxes, flux_u,  flux_v, u_star, &
        flux_sw_nir_dir, flux_sw_nir_dif, flux_sw_vis_dir, flux_sw_vis_dif,&
-       flux_lw, flux_t, flux_q, dhdt, dedt, drdt, lprec, fprec, coszen, p_surf )
+       flux_lw, flux_t, flux_q, flux_lhc, dhdt, dedt, drdt, lprec, fprec, coszen, p_surf )
 
     type (ice_data_type),             intent(inout) :: Ice
     type(coupler_3d_bc_type),         intent(inout) :: Atmos_boundary_fluxes
@@ -744,6 +773,9 @@ contains
     real, dimension(isc:iec,jsc:jec,km), intent(in) :: flux_lw          ! net longwave radiation (+ down)
     real, dimension(isc:iec,jsc:jec,km), intent(in) :: flux_t           ! sensible heat flux (+ up)
     real, dimension(isc:iec,jsc:jec,km), intent(in) :: flux_q           ! specific humidity flux (+up)
+#IFDEF COUP_OAS !sandra wird derzeit nicht verwendet
+    real, dimension(isc:iec,jsc:jec,km), optional, intent(in) :: flux_lhc           ! latent heat flux (+up)
+#ENDIF
     real, dimension(isc:iec,jsc:jec,km), intent(in) :: flux_sw_nir_dir ! net near IR direct shortwave radiation (+ down)
     real, dimension(isc:iec,jsc:jec,km), intent(in) :: flux_sw_nir_dif ! net near IR diffuse shortwave radiation (+ down)
     real, dimension(isc:iec,jsc:jec,km), intent(in) :: flux_sw_vis_dir ! net visible direct shortwave radiation (+ down)
@@ -780,7 +812,11 @@ contains
              flux_v_new(i,j,k)  = flux_v(i,j,k)
              flux_t_new(i,j,k)  = flux_t(i,j,k)
              flux_q_new(i,j,k)  = flux_q(i,j,k)
+!#IFDEF COUP_OAS !sandra
+!             flux_lh_new(i,j,k) = flux_lhc(i,j,k)
+!#ELSE
              flux_lh_new(i,j,k) = hlv*flux_q(i,j,k)
+!#ENDIF
              flux_lw_new(i,j,k) = flux_lw(i,j,k)
              flux_sw_nir_dir_new(i,j,k) = flux_sw_nir_dir(i,j,k)
              flux_sw_nir_dif_new(i,j,k) = flux_sw_nir_dif(i,j,k)
@@ -851,26 +887,26 @@ contains
           do i=isc, iec
              if (Ice%ice_mask(i,j,k)) then
                 if (Ice%h_snow(i,j,k)>0.0 .or. slab_ice) then
-                   flux_lh_new(i,j,k) = flux_lh_new(i,j,k) + hlf*flux_q(i,j,k)
+                   flux_lh_new(i,j,k) = flux_lh_new(i,j,k) + hlf*flux_q(i,j,k) ! add evaporating mass flux to longwave heat flux, but multiply it by specific freezing energy to convert it to a heat flux
                    latent             = hlv+hlf
                 else
-                   flux_lh_new(i,j,k) = flux_lh_new(i,j,k)+hlf*flux_q(i,j,k)*(1-TFI/Ice%t_ice1(i,j,k))
+                   flux_lh_new(i,j,k) = flux_lh_new(i,j,k)+hlf*flux_q(i,j,k)*(1-TFI/Ice%t_ice1(i,j,k)) ! TFI is freezing temp (°C), the latter is upper-layer ice temp (°C), both negative. If ice is very cold, the factor TFI/Ice%t_ice1(i,j,k) becomes close to 1 and all evaporation is from solid ice. If ice temperature is close to freezing temp we assume that a part was already liquid and requires less energy to evaporate.
                    latent             = hlv+hlf*(1-TFI/Ice%t_ice1(i,j,k))
                 end if
-                hfd = dhdt(i,j,k) + dedt(i,j,k)*latent + drdt(i,j,k)
-                hf  = flux_t(i,j,k) + flux_q(i,j,k)*latent - flux_lw(i,j,k)                  &
+                hfd = dhdt(i,j,k) + dedt(i,j,k)*latent + drdt(i,j,k) ! how sensible heat, evaporation and radiation change when temperature changes
+                hf  = flux_t(i,j,k) + flux_q(i,j,k)*latent - flux_lw(i,j,k)                  & !total upward heat flux which would occur at freezing temperature
                       - (1-Ice%pen(i,j,k))* (flux_sw_vis_dir(i,j,k)+flux_sw_vis_dif(i,j,k)+  &
                         flux_sw_nir_dir(i,j,k)+flux_sw_nir_dif(i,j,k))                       &
-                      - hfd*(Ice%t_surf(i,j,k)-Tfreeze)
+                      - hfd*(Ice%t_surf(i,j,k)-Tfreeze)                                        !(this is correction to freezing temperature)
                 call ice3lay_temp(Ice%h_snow(i,j,k), Ice%h_ice(i,j,k), Ice%t_ice1(i,j,k),    &
                                   Ice%t_ice2(i,j,k), ts_new, hf, hfd, Ice%pen(i,j,k)*        &
                                   (1-Ice%trn(i,j,k))*(flux_sw_vis_dir(i,j,k)+                &
                                   flux_sw_vis_dif(i,j,k)+flux_sw_nir_dir(i,j,k)+             &
                                   flux_sw_nir_dif(i,j,k)), -MU_TS*Ice%s_surf(i,j),           &
                                   Ice%bheat(i,j), dt_fast, Ice%tmelt(i,j,k), Ice%bmelt(i,j,k))
-                dts                = ts_new-(Ice%t_surf(i,j,k)-Tfreeze)
+                dts                = ts_new-(Ice%t_surf(i,j,k)-Tfreeze)                       ! surface temperature change during one time step
                 Ice%t_surf(i,j,k)  = Ice%t_surf(i,j,k)  + dts
-                flux_t_new(i,j,k)  = flux_t_new(i,j,k)  + dts * dhdt(i,j,k)
+                flux_t_new(i,j,k)  = flux_t_new(i,j,k)  + dts * dhdt(i,j,k)                   ! this changes fluxes
                 flux_q_new(i,j,k)  = flux_q_new(i,j,k)  + dts * dedt(i,j,k)
                 flux_lh_new(i,j,k) = flux_lh_new(i,j,k) + dts * dedt(i,j,k) * latent
                 flux_lw_new(i,j,k) = flux_lw_new(i,j,k) - dts * drdt(i,j,k)
@@ -878,6 +914,8 @@ contains
           end do
        end do
     end do
+
+
 
     call compute_ocean_roughness (Ice%mask, u_star(:,:,1), Ice%rough_mom(:,:,1), &
                                   Ice%rough_heat(:,:,1), Ice%rough_moist(:,:,1)  )
@@ -914,9 +952,11 @@ contains
 
     call sum_top_quantities ( Ice, Atmos_boundary_fluxes, flux_u_new,  flux_v_new, flux_t_new, &
       flux_q_new, flux_sw_nir_dir_new, flux_sw_nir_dif_new, flux_sw_vis_dir_new,               &
-      flux_sw_vis_dif_new, flux_lw_new, lprec_new,   fprec_new,  flux_lh_new )
+      flux_sw_vis_dif_new, flux_lw_new, lprec_new,   fprec_new,  flux_lh_new ) ! fluxes are stored 
 
     Ice%Time = Ice%Time + Ice%Time_step_fast ! advance time
+
+    !write(*,*)  "Ice%Time " , Ice%Time  ! sandra
 
   end subroutine update_ice_model_fast_old
 
@@ -1812,6 +1852,11 @@ subroutine atm_ice_bnd_type_chksum(id, timestep, bnd_type)
     write(outunit,100) 'atm_ice_bnd_type%u_star          ',mpp_chksum(bnd_type%u_star)
     write(outunit,100) 'atm_ice_bnd_type%t_flux          ',mpp_chksum(bnd_type%t_flux)
     write(outunit,100) 'atm_ice_bnd_type%q_flux          ',mpp_chksum(bnd_type%q_flux)
+#IFDEF COUP_OAS !sandra
+    write(outunit,100) 'atm_ice_bnd_type%lh_flux          ',mpp_chksum(bnd_type%lh_flux)
+    write(outunit,100) 'atm_ice_bnd_type%u_wind          ',mpp_chksum(bnd_type%u_wind)
+    write(outunit,100) 'atm_ice_bnd_type%v_wind          ',mpp_chksum(bnd_type%v_wind)
+#ENDIF
     write(outunit,100) 'atm_ice_bnd_type%lw_flux         ',mpp_chksum(bnd_type%lw_flux)
     write(outunit,100) 'atm_ice_bnd_type%sw_flux_vis_dir ',mpp_chksum(bnd_type%sw_flux_vis_dir)
     write(outunit,100) 'atm_ice_bnd_type%sw_flux_vis_dif ',mpp_chksum(bnd_type%sw_flux_vis_dif)

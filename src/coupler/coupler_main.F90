@@ -126,6 +126,7 @@ program coupler_main
 
 ! </INFO>
 
+
   use constants_mod,           only: constants_init
 
   use time_manager_mod,        only: time_type, set_calendar_type, set_time
@@ -224,7 +225,16 @@ program coupler_main
 
   use memutils_mod,            only: print_memuse_stats
 
+#IFDEF OASIS_IOW_ESM
+  use oas_vardef,              only: MOM5_instance_letter
+#ENDIF
+
   implicit none
+
+#IFDEF COUP_OAS !sandra
+  integer :: mpi_comm_mom
+#ENDIF
+
 
 !-----------------------------------------------------------------------
 
@@ -361,6 +371,8 @@ program coupler_main
 !   </NOTE>
 ! </NAMELIST>
 
+
+
   integer, dimension(6) :: restart_interval = (/ 0, 0, 0, 0, 0, 0/)
   integer, dimension(6) :: current_date     = (/ 0, 0, 0, 0, 0, 0 /)
   character(len=17) :: calendar = '                 '
@@ -384,7 +396,11 @@ program coupler_main
                          do_land, do_ice, do_ocean, do_flux, atmos_npes, ocean_npes, &
                          ice_npes, land_npes, atmos_nthreads, ocean_nthreads, &
                          concurrent, use_lag_fluxes, do_chksum, &
+#IFDEF OASIS_IOW_ESM
+                         check_stocks, restart_interval, MOM5_instance_letter
+#ELSE
                          check_stocks, restart_interval
+#ENDIF
 
   integer :: initClock, mainClock, termClock
 
@@ -417,20 +433,36 @@ character(len=256), parameter   :: note_header =                                
 
 !#######################################################################
 
-  call mpp_init()
+#IFDEF COUP_OAS   ! sandra
+ call oas_init(mpi_comm_mom)
+ call mpp_init(localcomm=mpi_comm_mom)
+#ELSE
+ call mpp_init()
+#ENDIF
+
 !these clocks are on the global pelist
   initClock = mpp_clock_id( 'Initialization' )
   call mpp_clock_begin(initClock)
-  
-  call fms_init
-  call constants_init
 
-  call coupler_init
+#IFDEF COUP_OAS   ! sandra
+ call fms_init(mpi_comm_mom)
+#ELSE
+ call fms_init()
+#ENDIF
+
+ call coupler_init
   if(do_chksum) call coupler_chksum('coupler_init+', 0)
 
-  call mpp_set_current_pelist()
+ call constants_init
 
+ call mpp_set_current_pelist()
+
+#IFDEF COUP_OAS  ! sandra
+  call oas_define(mpi_comm_mom)
+!  write(*,*) "finished oasis define"
+#ENDIF
   call mpp_clock_end (initClock) !end initialization
+
 
   call mpp_clock_begin(mainClock) !begin main loop
 
@@ -557,6 +589,7 @@ newClock14 = mpp_clock_id( 'final flux_check_stocks' )
 
            Time_atmos = Time_atmos + Time_step_atmos
 
+
            if (do_atmos) then
               call mpp_clock_begin(newClocka)
               call atmos_tracer_driver_gather_data(Atm%fields, Atm%tr_bot)
@@ -581,10 +614,12 @@ newClock14 = mpp_clock_id( 'final flux_check_stocks' )
            if(do_chksum) call atmos_ice_land_chksum('update_atmos_down+', (nc-1)*num_atmos_calls+na)
 
            call mpp_clock_begin(newClockd)
+           
            call flux_down_from_atmos( Time_atmos, Atm, Land, Ice, &
                 Land_ice_atmos_boundary, &
                 Atmos_land_boundary, &
-                Atmos_ice_boundary )
+                Atmos_ice_boundary, Ice_ocean_boundary,Time_start,Time_ocean,(na==1)) ! sandra for coupling
+
            call mpp_clock_end(newClockd)
            if(do_chksum) call atmos_ice_land_chksum('flux_down_from_atmos+', (nc-1)*num_atmos_calls+na)
 
@@ -603,10 +638,12 @@ newClock14 = mpp_clock_id( 'final flux_check_stocks' )
 
            !      ---- ice model ----
            call mpp_clock_begin(newClockf)
-           if (do_ice .AND. Ice%pe) then
+
+          if (do_ice .AND. Ice%pe) then
               if(ice_npes .NE. atmos_npes)call mpp_set_current_pelist(Ice%pelist)
               call update_ice_model_fast( Atmos_ice_boundary, Ice )
            endif
+
            if(ice_npes .NE. atmos_npes) call mpp_set_current_pelist(Atm%pelist)
            call mpp_clock_end(newClockf)
            if(do_chksum) call atmos_ice_land_chksum('update_ice_fast+', (nc-1)*num_atmos_calls+na)
@@ -623,9 +660,13 @@ newClock14 = mpp_clock_id( 'final flux_check_stocks' )
            call mpp_clock_begin(newClockh)
            if (do_atmos) &
                 call update_atmos_model_up( Land_ice_atmos_boundary, Atm )
+
            call mpp_clock_end(newClockh)
            if(do_chksum) call atmos_ice_land_chksum('update_atmos_up+', (nc-1)*num_atmos_calls+na)
 
+!#IFDEF COUP_OAS
+!        call oas_send_field(Ice) ! sandra
+!#ENDIF
            !--------------
 
         enddo
@@ -700,6 +741,9 @@ newClock14 = mpp_clock_id( 'final flux_check_stocks' )
         ! does not modify either Ocean or Ice_ocean_boundary
         call flux_ocean_from_ice_stocks(Ocean_state, Ocean, Ice_ocean_boundary)
 
+#IFDEF COUP_OAS
+        call oas_send_field(Ice,Time_start,Time_ocean) ! sandra
+#ENDIF
         Time_ocean = Time_ocean +  Time_step_cpld
 
         !-----------------------------------------------------------------------
@@ -735,7 +779,6 @@ newClock14 = mpp_clock_id( 'final flux_check_stocks' )
      call print_memuse_stats(text)
 !rabcall mpp_clock_end(newClock13)
 
-
   enddo
 
      call mpp_set_current_pelist()
@@ -757,13 +800,30 @@ call mpp_clock_end(newClock14)
   call mpp_clock_end(mainClock)
   call mpp_clock_begin(termClock)
 
+!#IFDEF COUP_OAS  ! sandra
+!  call oas_finalize ! needs to be called before fms_end()
+!#ENDIF 
+
   if(do_chksum) call coupler_chksum('coupler_end-', nc)
   call coupler_end
 
   call mpp_clock_end(termClock)
 
   call print_memuse_stats( 'Memory HiWaterMark', always=.TRUE. )
+
   call fms_end
+  
+
+#IFDEF COUP_OAS  ! sandra
+  call oas_finalize ! needs to be called  after fms_end()
+#ENDIF 
+ 
+  IF (mpp_pe().EQ.mpp_root_pe()) THEN
+     open(unit=50, file='goodfile')
+     write(50,*)'go on'
+     close(50)
+  ENDIF
+
 
 !-----------------------------------------------------------------------
 
@@ -1312,6 +1372,7 @@ contains
         endif
         call print_memuse_stats( 'ice_model_init' )
         call data_override_init(Ice_domain_in = Ice%domain)
+
     end if
     if( Ocean%is_ocean_pe )then
         call mpp_set_current_pelist(Ocean%pelist)

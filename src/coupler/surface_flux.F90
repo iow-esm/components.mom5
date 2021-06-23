@@ -476,7 +476,25 @@ subroutine surface_flux_1d (                                           &
     call  ncar_ocean_fluxes (w_atm, th_atm, t_surf0, q_atm, q_surf0, z_atm, &
                              seawater, cd_m, cd_t, cd_q, u_star, b_star     )
   end if
+#IFDEF COUP_OAS !sandra
+     flux_t     = 0.0
+     flux_q     = 0.0
+     flux_r     = 0.0
+     flux_u     = 0.0
+     flux_v     = 0.0
+     dhdt_surf  = 0.0
+     dedt_surf  = 0.0
+     dedq_surf  = 0.0
+     drdt_surf  = 0.0
+     dhdt_atm   = 0.0
+     dedq_atm   = 0.0
+     u_star     = 0.0
+     b_star     = 0.0
+     q_star     = 0.0
+     q_surf     = 0.0
+     w_atm      = 0.0
 
+#ELSE
   where (avail)
      ! scale momentum drag coefficient on orographic roughness
      cd_m = cd_m*(log(z_atm/rough_mom+1)/log(z_atm/rough_scale+1))**2
@@ -540,7 +558,7 @@ subroutine surface_flux_1d (                                           &
      q_surf     = 0.0
      w_atm      = 0.0
   endwhere
-
+#ENDIF
   ! calculate d(stress component)/d(atmos wind component)
   dtaudu_atm = 0.0
   dtaudv_atm = 0.0

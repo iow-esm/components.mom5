@@ -100,7 +100,7 @@ set lib_name = "lib_FMS"
 mkdir -p $executable:h:h/$lib_name
 cd $executable:h:h/$lib_name
 $mkmf_lib -p $lib_name.a -c "$cppDefs" $srcList $pathnames_shared $lib_include_dirs
-make
+${IOW_ESM_MAKE}
 
 if( $status ) then
     echo "Make failed to create $lib_name.a"

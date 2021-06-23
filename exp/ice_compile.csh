@@ -7,8 +7,8 @@ set lib_name = "lib_ice"
 
 mkdir -p $executable:h:h/$lib_name
 cd $executable:h:h/$lib_name
-$mkmf_lib -p $lib_name.a -c "$cppDefs" -o "-I$executable:h:h/lib_FMS" $srcList $lib_include_dirs
-make
+$mkmf_lib -p $lib_name.a -c "$cppDefs" -o "-I$executable:h:h/lib_FMS" $srcList $lib_include_dirs 
+${IOW_ESM_MAKE}
 
 if( $status ) then
     echo "Make failed to create $lib_name.a"
