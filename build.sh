@@ -1,34 +1,22 @@
-#!/bin/bash
-# LOAD REQUIRED MODULES
-module load intel/19.1.0 
-module load openmpi/intel.19/3.1.6 
-module load netcdf/intel.19/4.7.4
+target=$1
+debug=${2:-"release"}
+fast=${3:-"fast"}
 
-# GET IOW ESM ROOT PATH
-export IOW_ESM_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )/../.."
+source ../../local_scripts/identify_target.sh $target $debug $fast
 
-# SET SYSTEM-SPECIFIC COMPILER OPTIONS AND PATHS
-# compile mode: "PRODUCTION" or "DEBUG"
-export IOW_ESM_COMPILE_MODE="PRODUCTION"
-# include paths
-export IOW_ESM_NETCDF_INCLUDE="${NETCDF_INCLUDE_PATH}"
-export IOW_ESM_NETCDF_LIBRARY="${NETCDF_LIBRARY_PATH}"
-# executables
-export IOW_ESM_MAKE="/usr/bin/make"
-export IOW_ESM_FC="mpifort"
-export IOW_ESM_CC="mpicc"
-export IOW_ESM_LD="mpifort"
-# compiler flags
-export IOW_ESM_CPPDEFS="-DCOUP_OAS -DOASIS_IOW_ESM"
-export IOW_ESM_FFLAGS="-O3 -r8 -no-prec-div -fp-model fast=2 -xHost -I${IOW_ESM_NETCDF_INCLUDE}/"
-export IOW_ESM_CFLAGS="-O3 -r8 -no-prec-div -fp-model fast=2 -xHost -I${IOW_ESM_NETCDF_INCLUDE}/"
-export IOW_ESM_LDFLAGS="-L${IOW_ESM_NETCDF_LIBRARY} -lnetcdf -lnetcdff -Wl,-rpath,${IOW_ESM_NETCDF_LIBRARY}"
+# component to build
+component="MOM5"
 
-# MAKE CLEAN
-rm -r ${IOW_ESM_ROOT}/components/MOM5/exec/IOW_ESM_${IOW_ESM_COMPILE_MODE}
+# deploy the code from local source
+echo rsync -r -i -u src ${dest}/components/${component}/.
+echo rsync -i -u start_build_${target}.sh ${dest}/components/${component}/
+echo rsync -i -u build_${target}.sh ${dest}/components/${component}/
+rsync -r -i -u src ${dest}/components/${component}/.
+rsync -i -u start_build_${target}.sh ${dest}/components/${component}/
+rsync -i -u build_${target}.sh ${dest}/components/${component}/
 
-# RUN BUILD COMMAND
-cd ${IOW_ESM_ROOT}/components/MOM5/exp
-./MOM_compile.csh
-cd ${IOW_ESM_ROOT}/components/MOM5
+# start the build process
+echo ssh -t "${user_at_dest}" "cd ${dest_folder}/components/${component}/; bash -c \"source ~/.bash_profile; source start_build_${target}.sh $debug $fast\""
+ssh -t "${user_at_dest}" "cd ${dest_folder}/components/${component}/; bash -c \"source ~/.bash_profile; source start_build_${target}.sh $debug $fast\""
 
+echo "$component $target $debug $fast" > ../LAST_BUILD
