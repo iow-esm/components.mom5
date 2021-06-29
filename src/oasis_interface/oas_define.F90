@@ -257,19 +257,24 @@ SUBROUTINE oas_define(local_comm)
   srcv(29)%var_name = 'MRRBBR06'      ! longwave radiation upward
   srcv(30)%var_name = 'MRRLWD01'      ! longwave radiation downward
   srcv(31)%var_name = 'MRRSDD01'      ! shortwave radiation downward direct
-  srcv(32)%var_name = 'MRRSIN01'      ! shortwave radiation downward diffusive
-  srcv(33)%var_name = 'MRHLAT01'      ! latent heat flux
-  srcv(34)%var_name = 'MRHLAT02'      ! latent heat flux
-  srcv(35)%var_name = 'MRHLAT03'      ! latent heat flux
-  srcv(36)%var_name = 'MRHLAT04'      ! latent heat flux
-  srcv(37)%var_name = 'MRHLAT05'      ! latent heat flux
-  srcv(38)%var_name = 'MRHLAT06'      ! latent heat flux
-  srcv(39)%var_name = 'MRHSEN01'      ! sensible heat flux
-  srcv(40)%var_name = 'MRHSEN02'      ! sensible heat flux
-  srcv(41)%var_name = 'MRHSEN03'      ! sensible heat flux
-  srcv(42)%var_name = 'MRHSEN04'      ! sensible heat flux
-  srcv(43)%var_name = 'MRHSEN05'      ! sensible heat flux
-  srcv(44)%var_name = 'MRHSEN06'      ! sensible heat flux
+  srcv(32)%var_name = 'MRRSDD02'      ! shortwave radiation downward direct
+  srcv(33)%var_name = 'MRRSDD03'      ! shortwave radiation downward direct
+  srcv(34)%var_name = 'MRRSDD04'      ! shortwave radiation downward direct
+  srcv(35)%var_name = 'MRRSDD05'      ! shortwave radiation downward direct
+  srcv(36)%var_name = 'MRRSDD06'      ! shortwave radiation downward direct
+  srcv(37)%var_name = 'MRRSIN01'      ! shortwave radiation downward diffusive
+  srcv(38)%var_name = 'MRHLAT01'      ! latent heat flux
+  srcv(39)%var_name = 'MRHLAT02'      ! latent heat flux
+  srcv(40)%var_name = 'MRHLAT03'      ! latent heat flux
+  srcv(41)%var_name = 'MRHLAT04'      ! latent heat flux
+  srcv(42)%var_name = 'MRHLAT05'      ! latent heat flux
+  srcv(43)%var_name = 'MRHLAT06'      ! latent heat flux
+  srcv(44)%var_name = 'MRHSEN01'      ! sensible heat flux
+  srcv(45)%var_name = 'MRHSEN02'      ! sensible heat flux
+  srcv(46)%var_name = 'MRHSEN03'      ! sensible heat flux
+  srcv(47)%var_name = 'MRHSEN04'      ! sensible heat flux
+  srcv(48)%var_name = 'MRHSEN05'      ! sensible heat flux
+  srcv(49)%var_name = 'MRHSEN06'      ! sensible heat flux
 
 #else
   srcv( 1)%var_name = 'OCEREPRE'      ! precipitation
