@@ -19,4 +19,4 @@ rsync -i -u build_${target}.sh ${dest}/components/${component}/
 echo ssh -t "${user_at_dest}" "cd ${dest_folder}/components/${component}/; bash -c \"source ~/.bash_profile; source start_build_${target}.sh $debug $fast\""
 ssh -t "${user_at_dest}" "cd ${dest_folder}/components/${component}/; bash -c \"source ~/.bash_profile; source start_build_${target}.sh $debug $fast\""
 
-echo "$component $target $debug $fast" > ../LAST_BUILD
+../../local_scripts/tag_build.sh "$target" "$debug" "$fast"
