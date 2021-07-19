@@ -41,7 +41,7 @@ IMPLICIT NONE
 
 #IFDEF OASIS_IOW_ESM
   INTEGER, PARAMETER :: nfld_snd_tot=18
-  INTEGER, PARAMETER :: nfld_rcv_tot=44
+  INTEGER, PARAMETER :: nfld_rcv_tot=49
 #ELSE
   INTEGER, PARAMETER :: nfld_snd_tot=2
   INTEGER, PARAMETER :: nfld_rcv_tot=14

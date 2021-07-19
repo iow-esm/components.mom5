@@ -180,29 +180,30 @@ integer, parameter :: dt_cpld=600
   !ENDIF
 
   jn = 31
-  !IF( nrcvinfo(jn) == OASIS_Rcv ) THEN                                                               ! shortwave radiation direct 31)
+  !IF( nrcvinfo(jn) == OASIS_Rcv ) THEN                                                               ! shortwave radiation direct 31..36
     do k = 1, size(Ice_boundary%sw_flux_vis_dir,3)
       WHERE (maskt == 0) Ice_boundary%sw_flux_vis_dir(isc:iec,jsc:jec,k) =  -frcv(isc:iec,jsc:jec,jn)
+      jn = jn + 1
     enddo
   !ENDIF
 
-  jn = 32
-  !IF( nrcvinfo(jn) == OASIS_Rcv ) THEN                                                              ! shortware radiation diffusive 32)
+  jn = 37
+  !IF( nrcvinfo(jn) == OASIS_Rcv ) THEN                                                              ! shortware radiation diffusive 37)
     do k = 1, size(Ice_boundary%sw_flux_vis_dif,3)
       WHERE (maskt == 0) Ice_boundary%sw_flux_vis_dif(isc:iec,jsc:jec,k) =  -frcv(isc:iec,jsc:jec,jn)
     enddo
   !ENDIF
 
-  jn = 33
-  !IF( nrcvinfo(jn) == OASIS_Rcv ) THEN                                                              ! latent heat flux 33..38)
+  jn = 38
+  !IF( nrcvinfo(jn) == OASIS_Rcv ) THEN                                                              ! latent heat flux 38..43)
     do k = 1, size(Ice_boundary%lh_flux,3)
       WHERE (maskt == 0) Ice_boundary%lh_flux(isc:iec,jsc:jec,k) =  frcv(isc:iec,jsc:jec,jn)
       jn = jn + 1
     enddo 
   !ENDIF
 
-  jn = 39
-  !IF( nrcvinfo(jn) == OASIS_Rcv ) THEN                                                              ! sensible heat flux 39..44)
+  jn = 44
+  !IF( nrcvinfo(jn) == OASIS_Rcv ) THEN                                                              ! sensible heat flux 44..49)
     do k = 1, size(Ice_boundary%t_flux,3)
       WHERE (maskt == 0) Ice_boundary%t_flux(isc:iec,jsc:jec,k) =  frcv(isc:iec,jsc:jec,jn)
       jn = jn + 1
