@@ -1,5 +1,5 @@
 #IFDEF OASIS_IOW_ESM
-SUBROUTINE oas_exchange_fields(Ice,Ice_boundary,Ice_Ocean_Boundary,Time_start,Timet)
+SUBROUTINE oas_exchange_fields(Ice,Ice_boundary,Ice_Ocean_Boundary,Time_start,Timet,dt_cpld)
 
 !!---------------------------------------------------------------------
 !!              ***  ROUTINE send_fld  ***
@@ -42,7 +42,8 @@ TYPE (ice_data_type),      INTENT(IN) :: Ice
 TYPE (atmos_ice_boundary_type), INTENT(INOUT) :: Ice_boundary
 type(ice_ocean_boundary_type), intent(inout) :: Ice_Ocean_Boundary
 type(time_type),           intent(in) :: Time_start,Timet ! for coupling sandra
-integer, parameter :: dt_cpld=600
+
+INTEGER, INTENT(IN) :: dt_cpld
 
   ztmp1 (:,:) = 0
   nrcvinfo (:) = OASIS_idle
@@ -51,8 +52,9 @@ integer, parameter :: dt_cpld=600
   isec = (864e2*dy+sc)
 
   write(*,*) 'inside oas_exchange_fields at isec=',isec
+  WRITE (*,*) "with coupling time step dt_cpld=", dt_cpld
   if (mod(isec,dt_cpld)==0) then
-    write(*,*) 'calling MPI_BARRIER'
+    write(*,*) 'calling MPI_BARRIER at isec=', isec, ', dt_cpld=', dt_cpld
     call MPI_BARRIER(MPI_COMM_WORLD,dummy)
     write(*,*) 'passed MPI_BARRIER'
   endif

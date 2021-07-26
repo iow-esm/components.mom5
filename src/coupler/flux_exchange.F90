@@ -1109,6 +1109,7 @@ subroutine flux_exchange_init ( Time, Atm, Land, Ice, Ocean, Ocean_state,&
     Dt_cpl = 0
     if(present(dt_atmos)) Dt_atm = dt_atmos
     if(present(dt_cpld )) Dt_cpl = dt_cpld
+    WRITE (*,*) "Set coupling time step Dt_cpl=", Dt_cpl, " from dt_cpld=", dt_cpld
  
     !z1l check the flux conservation.
     if(debug_stocks) call check_flux_conservation(Ice, Ocean, Ice_Ocean_Boundary)
@@ -2530,7 +2531,7 @@ subroutine flux_down_from_atmos (Time, Atm, Land, Ice, &
 #IFDEF OASIS_IOW_ESM
   if (couple_flux_calculator) then
     write(*,*) 'calling oas_exchange_fields'
-    call oas_exchange_fields(Ice,Ice_boundary,ice_ocean_boundary,Time_start,Timet)
+    call oas_exchange_fields(Ice,Ice_boundary,ice_ocean_boundary,Time_start,Timet, INT(Dt_cpl))
   endif
 #ENDIF
 #IFDEF COUP_OAS !sandra
