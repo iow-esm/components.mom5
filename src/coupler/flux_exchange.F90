@@ -2530,13 +2530,17 @@ subroutine flux_down_from_atmos (Time, Atm, Land, Ice, &
   enddo  !} n
 #IFDEF OASIS_IOW_ESM
   if (couple_flux_calculator) then
+#ifdef IOW_ESM_DEBUG
     write(*,*) 'calling oas_exchange_fields'
+#endif
     call oas_exchange_fields(Ice,Ice_boundary,ice_ocean_boundary,Time_start,Timet, INT(Dt_cpl))
   endif
 #ENDIF
 #IFDEF COUP_OAS !sandra
 !  write(*,*) "start oasis receive in flux exchange"
+#ifdef IOW_ESM_DEBUG
   write(*,*) 'really calling oas_receive_field'
+#endif
   call oas_receive_field(Ice,Ice_boundary,ice_ocean_boundary,Time_start,Timet)
 #ELSE
 

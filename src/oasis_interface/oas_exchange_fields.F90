@@ -51,27 +51,39 @@ INTEGER, INTENT(IN) :: dt_cpld
   call get_time(Timet-Time_start, sc, dy)
   isec = (864e2*dy+sc)
 
+#ifdef IOW_ESM_DEBUG
   write(*,*) 'inside oas_exchange_fields at isec=',isec
   WRITE (*,*) "with coupling time step dt_cpld=", dt_cpld
+#endif
   if (mod(isec,dt_cpld)==0) then
+#ifdef IOW_ESM_DEBUG
     write(*,*) 'calling MPI_BARRIER at isec=', isec, ', dt_cpld=', dt_cpld
+#endif
     call MPI_BARRIER(MPI_COMM_WORLD,dummy)
+#ifdef IOW_ESM_DEBUG
     write(*,*) 'passed MPI_BARRIER'
+#endif
   endif
 !----------------------------------------------------------------------------
 ! STEP 1: Send area fraction of each ice class and surface temperature of each ice class 
 !----------------------------------------------------------------------------
+#ifdef IOW_ESM_DEBUG
   write(*,*) 'Sending MSFARE01..MSFARE06 at isec=',isec
+#endif
   DO jn=1,6  
     ztmp1(isc:iec,jsc:jec) =Ice%part_size(isc:iec,jsc:jec,jn)             
     CALL oas_send (jn, isec,ztmp1, kinfo )   ! send MSFARE01..MSFARE06
   ENDDO
+#ifdef IOW_ESM_DEBUG
   write(*,*) 'Sending MSTSUR01..MSTSUR06 at isec=',isec
+#endif
   DO jn=1,6
     ztmp1(isc:iec,jsc:jec) =Ice%t_surf(isc:iec,jsc:jec,jn)             
     CALL oas_send (jn+6, isec,ztmp1, kinfo )   ! send MSTSUR01..MSTSUR06
   ENDDO
+#ifdef IOW_ESM_DEBUG
   write(*,*) 'Sending MSALBE01..MSALBE06 at isec=',isec
+#endif
   DO jn=1,6
     ztmp1(isc:iec,jsc:jec) =Ice%albedo_vis_dir(isc:iec,jsc:jec,jn)             
     CALL oas_send (jn+12, isec,ztmp1, kinfo )   ! send MSALBE01..MSALBE06
@@ -211,8 +223,9 @@ INTEGER, INTENT(IN) :: dt_cpld
       jn = jn + 1
     enddo 
   !ENDIF
-  
+#ifdef IOW_ESM_DEBUG 
   write(*,*) 'oas_exchange_fields finished.'
+#endif
 
 END SUBROUTINE oas_exchange_fields
 #ENDIF
