@@ -764,7 +764,11 @@ contains
   !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~!
   subroutine update_ice_model_fast_old (Ice, Atmos_boundary_fluxes, flux_u,  flux_v, u_star, &
        flux_sw_nir_dir, flux_sw_nir_dif, flux_sw_vis_dir, flux_sw_vis_dif,&
-       flux_lw, flux_t, flux_q, flux_lhc, dhdt, dedt, drdt, lprec, fprec, coszen, p_surf )
+       flux_lw, flux_t, flux_q, &
+#IFDEF COUP_OAS
+       flux_lhc, &
+#ENDIF
+       dhdt, dedt, drdt, lprec, fprec, coszen, p_surf )
 
     type (ice_data_type),             intent(inout) :: Ice
     type(coupler_3d_bc_type),         intent(inout) :: Atmos_boundary_fluxes
