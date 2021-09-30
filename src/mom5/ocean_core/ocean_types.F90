@@ -1215,7 +1215,7 @@ module ocean_types_mod
      real, pointer, dimension(:,:) :: ustoke          =>NULL() ! x-dir surface stokes drift
      real, pointer, dimension(:,:) :: vstoke          =>NULL() ! y-dir surface stokes drift
      real, pointer, dimension(:,:) :: wavlen          =>NULL() ! wave length
-#IFDEF COUP_OAS !sandra
+#IFDEF OASIS_IOW_ESM
      real, pointer, dimension(:,:) :: u_wind              =>NULL() ! u_wind for wave_model
      real, pointer, dimension(:,:) :: v_wind              =>NULL() ! v_wind for wave model 
 #ENDIF

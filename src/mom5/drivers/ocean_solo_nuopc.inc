@@ -868,7 +868,11 @@ module ocean_solo_mod
 
     call external_coupler_sbc_before(Ice_ocean_boundary, Ocean_sfc, nc, dt_cpld )
 
+#IFDEF OASIS_IOW_ESM     
+     call update_ocean_model(Ice_ocean_boundary, Ocean_state, Ocean_sfc, Time, Time_step_coupled, 'none')
+#ELSE
     call update_ocean_model(Ice_ocean_boundary, Ocean_state, Ocean_sfc, Time, Time_step_coupled)
+#ENDIF
 
     Time = Time + Time_step_coupled
 

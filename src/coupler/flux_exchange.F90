@@ -241,6 +241,10 @@ module flux_exchange_mod
                                         do_specified_land
 #endif
 
+#IFDEF OASIS_IOW_ESM
+  use oas_vardef,              only: type_atmos
+#ENDIF
+
   implicit none
   include 'netcdf.inc'
 private
@@ -820,7 +824,6 @@ subroutine flux_exchange_init ( Time, Atm, Land, Ice, Ocean, Ocean_state,&
         call setup_xmap(xmap_sfc, (/ 'ATM', 'OCN', 'LND' /),   &
              (/ Atm%Domain, Ice%Domain, Land%Domain /),        &
              "INPUT/grid_spec.nc", Atm%grid)
-! sandra test not done 18122018       write(*,*) "xgrid i ", xmap_sfc%x2(1)%i
         ! exchange grid indices
         X1_GRID_ATM = 1; X1_GRID_ICE = 2; X1_GRID_LND = 3;
         call generate_sfc_xgrid( Land, Ice )
@@ -863,8 +866,10 @@ subroutine flux_exchange_init ( Time, Atm, Land, Ice, Ocean, Ocean_state,&
         allocate( atmos_ice_boundary%u_star(is:ie,js:je,kd) )
         allocate( atmos_ice_boundary%t_flux(is:ie,js:je,kd) )
         allocate( atmos_ice_boundary%q_flux(is:ie,js:je,kd) )
-#IFDEF COUP_OAS !sandra
-        allocate( atmos_ice_boundary%lh_flux(is:ie,js:je,kd) )
+#IFDEF OASIS_IOW_ESM
+        IF (TRIM(type_atmos) == 'flux_calculator') THEN
+            allocate( atmos_ice_boundary%lh_flux(is:ie,js:je,kd) )
+        ENDIF
 #ENDIF
         allocate( atmos_ice_boundary%lw_flux(is:ie,js:je,kd) )
         allocate( atmos_ice_boundary%sw_flux_vis_dir(is:ie,js:je,kd) )
@@ -884,8 +889,10 @@ subroutine flux_exchange_init ( Time, Atm, Land, Ice, Ocean, Ocean_state,&
         atmos_ice_boundary%u_star=0.0
         atmos_ice_boundary%t_flux=0.0
         atmos_ice_boundary%q_flux=0.0
-#IFDEF COUP_OAS !sandra
-        atmos_ice_boundary%lh_flux=0.0
+#IFDEF OASIS_IOW_ESM
+        IF (TRIM(type_atmos) == 'flux_calculator') THEN
+            atmos_ice_boundary%lh_flux=0.0
+        ENDIF
 #ENDIF
         atmos_ice_boundary%lw_flux=0.0
         atmos_ice_boundary%sw_flux_vis_dir=0.0
@@ -1044,9 +1051,11 @@ subroutine flux_exchange_init ( Time, Atm, Land, Ice, Ocean, Ocean_state,&
     allocate( ice_ocean_boundary%calving_hflx  (is:ie,js:je) ) ; ice_ocean_boundary%calving_hflx = 0.0
     allocate( ice_ocean_boundary%p        (is:ie,js:je) ) ; ice_ocean_boundary%p = 0.0
     allocate( ice_ocean_boundary%mi       (is:ie,js:je) ) ; ice_ocean_boundary%mi = 0.0
-#IFDEF COUP_OAS !sandra
-    allocate( ice_ocean_boundary%u_wind       (is:ie,js:je) ) ; ice_ocean_boundary%u_wind = 0.0
-    allocate( ice_ocean_boundary%v_wind       (is:ie,js:je) ) ; ice_ocean_boundary%v_wind = 0.0
+#IFDEF OASIS_IOW_ESM
+    IF (TRIM(type_atmos) == 'flux_calculator') THEN
+      allocate( ice_ocean_boundary%u_wind       (is:ie,js:je) ) ; ice_ocean_boundary%u_wind = 0.0
+      allocate( ice_ocean_boundary%v_wind       (is:ie,js:je) ) ; ice_ocean_boundary%v_wind = 0.0
+    ENDIF
 #ENDIF
 
 !
@@ -1109,7 +1118,10 @@ subroutine flux_exchange_init ( Time, Atm, Land, Ice, Ocean, Ocean_state,&
     Dt_cpl = 0
     if(present(dt_atmos)) Dt_atm = dt_atmos
     if(present(dt_cpld )) Dt_cpl = dt_cpld
+
+#IFDEF OASIS_IOW_ESM
     WRITE (*,*) "Set coupling time step Dt_cpl=", Dt_cpl, " from dt_cpld=", dt_cpld
+#ENDIF
  
     !z1l check the flux conservation.
     if(debug_stocks) call check_flux_conservation(Ice, Ocean, Ice_Ocean_Boundary)
@@ -2153,17 +2165,23 @@ end subroutine sfc_boundary_layer
 !  </INOUT>
 !
 subroutine flux_down_from_atmos (Time, Atm, Land, Ice, &
-     Atmos_boundary, Land_boundary, Ice_boundary,ice_ocean_boundary,Time_start,Timet, couple_flux_calculator )  ! for coupling sandra
-
-  type(time_type),       intent(in) :: Time,Time_start,Timet ! for coupling sandra
+     Atmos_boundary, Land_boundary, &
+#IFDEF OASIS_IOW_ESM
+     Ice_boundary,ice_ocean_boundary,Time_start,Timet, couple_flux_calculator )
+#ELSE
+     Ice_boundary)
+#ENDIF
   type(atmos_data_type), intent(inout) :: Atm
   type(land_data_type),  intent(in) :: Land
   type(ice_data_type),   intent(in) :: Ice
   type(land_ice_atmos_boundary_type),intent(in) :: Atmos_boundary
   type(atmos_land_boundary_type),    intent(inout):: Land_boundary
   type(atmos_ice_boundary_type),     intent(inout):: Ice_boundary
-  type(ice_ocean_boundary_type),     intent(inout):: ice_ocean_boundary  ! for coupling sandra
+#IFDEF OASIS_IOW_ESM
+  type(time_type),       intent(in) :: Time,Time_start,Timet
+  type(ice_ocean_boundary_type),     intent(inout):: ice_ocean_boundary
   logical,               intent(in) :: couple_flux_calculator
+#ENDIF
 
   real, dimension(n_xgrid_sfc) :: ex_flux_sw, ex_flux_lwd, &
        ex_flux_sw_dir,  &
@@ -2528,21 +2546,17 @@ subroutine flux_down_from_atmos (Time, Atm, Land, Ice, &
            ex_gas_fluxes%bc(n)%field(m)%values, xmap_sfc)
     enddo  !} m
   enddo  !} n
+
 #IFDEF OASIS_IOW_ESM
-  if (couple_flux_calculator) then
+  IF (TRIM(type_atmos) == 'flux_calculator') THEN
+   if (couple_flux_calculator) then
 #ifdef IOW_ESM_DEBUG
     write(*,*) 'calling oas_exchange_fields'
 #endif
     call oas_exchange_fields(Ice,Ice_boundary,ice_ocean_boundary,Time_start,Timet, INT(Dt_cpl))
-  endif
+   endif
+  ELSEIF (TRIM(type_atmos) == 'none') THEN
 #ENDIF
-#IFDEF COUP_OAS !sandra
-!  write(*,*) "start oasis receive in flux exchange"
-#ifdef IOW_ESM_DEBUG
-  write(*,*) 'really calling oas_receive_field'
-#endif
-  call oas_receive_field(Ice,Ice_boundary,ice_ocean_boundary,Time_start,Timet)
-#ELSE
 
 !Balaji: data_override calls moved here from coupler_main
 !  if (ov) then
@@ -2582,6 +2596,8 @@ subroutine flux_down_from_atmos (Time, Atm, Land, Ice, &
   call data_override('ICE', 'u_flux', Ice_boundary%u_flux,  Time)
   call data_override('ICE', 'v_flux', Ice_boundary%v_flux,  Time)
 
+#IFDEF OASIS_IOW_ESM
+ ENDIF
 #ENDIF
 
   call data_override('ICE', 'dhdt',   Ice_boundary%dhdt,    Time)

@@ -1,4 +1,4 @@
-#IFDEF COUP_OAS
+#IFDEF OASIS_IOW_ESM
 MODULE oas_vardef
 
 !Controls, definitions and variables
@@ -32,6 +32,8 @@ IMPLICIT NONE
   CHARACTER(len=128) :: comp_out ! name of the output log file
   CHARACTER(len=3)   :: chout
 
+  CHARACTER(len=16) :: type_atmos = 'flux_calculator'
+
   TYPE :: CPL_FLD
     CHARACTER(LEN = 1)      :: clgrid    ! Grid type
     LOGICAL                 :: laction = .TRUE.   ! To be coupled or not
@@ -39,13 +41,8 @@ IMPLICIT NONE
     INTEGER                 :: vari_id     ! Id of the field
   END TYPE CPL_FLD
 
-#IFDEF OASIS_IOW_ESM
   INTEGER, PARAMETER :: nfld_snd_tot=18
   INTEGER, PARAMETER :: nfld_rcv_tot=49
-#ELSE
-  INTEGER, PARAMETER :: nfld_snd_tot=2
-  INTEGER, PARAMETER :: nfld_rcv_tot=14
-#ENDIF  
 
   TYPE(CPL_FLD), ALLOCATABLE :: &
     srcv(:),                 & ! All fields to be received

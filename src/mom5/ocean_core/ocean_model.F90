@@ -1395,17 +1395,27 @@ subroutine ocean_model_init(Ocean, Ocean_state, Time_init, Time_in)
 ! </DESCRIPTION>
 !
   subroutine update_ocean_model(Ice_ocean_boundary, Ocean_state, Ocean_sfc, &
-                         time_start_update, Ocean_coupling_time_step, do_wave_in)
+                         time_start_update, Ocean_coupling_time_step, & 
+#IFDEF OASIS_IOW_ESM
+                        type_atmos, do_wave_in)
+#ELSE
+                         do_wave_in)
+#ENDIF
     type(ice_ocean_boundary_type), intent(inout) :: Ice_ocean_boundary
     type(ocean_state_type),        pointer       :: Ocean_state
     type(ocean_public_type),       intent(inout) :: Ocean_sfc
     type(time_type),               intent(in)    :: time_start_update
     type(time_type),               intent(in)    :: Ocean_coupling_time_step
+#IFDEF OASIS_IOW_ESM
+    CHARACTER(*), optional, intent(in)  :: type_atmos 
+#ENDIF
     logical, optional,             intent(in)    :: do_wave_in    
+
     integer :: seconds, days
     integer :: num_ocn
     integer :: taum1, tau, taup1
     integer :: i, j, k, n
+
 
     call mpp_clock_begin(id_ocean)
 
@@ -1520,7 +1530,11 @@ subroutine ocean_model_init(Ocean, Ocean_state, Time_init, Time_in)
 
        ! update the simplified MOM version of a wave model
        call mpp_clock_begin(id_wave)
+#IFDEF OASIS_IOW_ESM
+       call ocean_wave_model(Time, Waves, Ice_ocean_boundary, type_atmos)
+#ELSE
        call ocean_wave_model(Time, Waves, Ice_ocean_boundary)
+#ENDIF
        call mpp_clock_end(id_wave)
 
 #if defined (ENABLE_ODA) && defined (ENABLE_ECDA)
