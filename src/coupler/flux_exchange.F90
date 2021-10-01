@@ -867,9 +867,7 @@ subroutine flux_exchange_init ( Time, Atm, Land, Ice, Ocean, Ocean_state,&
         allocate( atmos_ice_boundary%t_flux(is:ie,js:je,kd) )
         allocate( atmos_ice_boundary%q_flux(is:ie,js:je,kd) )
 #IFDEF OASIS_IOW_ESM
-        IF (TRIM(type_atmos) == 'flux_calculator') THEN
-            allocate( atmos_ice_boundary%lh_flux(is:ie,js:je,kd) )
-        ENDIF
+        allocate( atmos_ice_boundary%lh_flux(is:ie,js:je,kd) )
 #ENDIF
         allocate( atmos_ice_boundary%lw_flux(is:ie,js:je,kd) )
         allocate( atmos_ice_boundary%sw_flux_vis_dir(is:ie,js:je,kd) )
@@ -890,9 +888,7 @@ subroutine flux_exchange_init ( Time, Atm, Land, Ice, Ocean, Ocean_state,&
         atmos_ice_boundary%t_flux=0.0
         atmos_ice_boundary%q_flux=0.0
 #IFDEF OASIS_IOW_ESM
-        IF (TRIM(type_atmos) == 'flux_calculator') THEN
-            atmos_ice_boundary%lh_flux=0.0
-        ENDIF
+        atmos_ice_boundary%lh_flux=0.0
 #ENDIF
         atmos_ice_boundary%lw_flux=0.0
         atmos_ice_boundary%sw_flux_vis_dir=0.0
@@ -1052,10 +1048,8 @@ subroutine flux_exchange_init ( Time, Atm, Land, Ice, Ocean, Ocean_state,&
     allocate( ice_ocean_boundary%p        (is:ie,js:je) ) ; ice_ocean_boundary%p = 0.0
     allocate( ice_ocean_boundary%mi       (is:ie,js:je) ) ; ice_ocean_boundary%mi = 0.0
 #IFDEF OASIS_IOW_ESM
-    IF (TRIM(type_atmos) == 'flux_calculator') THEN
-      allocate( ice_ocean_boundary%u_wind       (is:ie,js:je) ) ; ice_ocean_boundary%u_wind = 0.0
-      allocate( ice_ocean_boundary%v_wind       (is:ie,js:je) ) ; ice_ocean_boundary%v_wind = 0.0
-    ENDIF
+    allocate( ice_ocean_boundary%u_wind       (is:ie,js:je) ) ; ice_ocean_boundary%u_wind = 0.0
+    allocate( ice_ocean_boundary%v_wind       (is:ie,js:je) ) ; ice_ocean_boundary%v_wind = 0.0
 #ENDIF
 
 !
@@ -2164,23 +2158,32 @@ end subroutine sfc_boundary_layer
 !   A derived data type to specify properties and fluxes passed from atmosphere to ice.
 !  </INOUT>
 !
-subroutine flux_down_from_atmos (Time, Atm, Land, Ice, &
-     Atmos_boundary, Land_boundary, &
 #IFDEF OASIS_IOW_ESM
-     Ice_boundary,ice_ocean_boundary,Time_start,Timet, couple_flux_calculator )
+subroutine flux_down_from_atmos (Time, Atm, Land, Ice, &
+   Atmos_boundary, Land_boundary, Ice_boundary, ice_ocean_boundary, &
+   Time_start, Timet, couple_flux_calculator )
+
+   type(time_type),       intent(in) :: Time
+   type(atmos_data_type), intent(inout) :: Atm
+   type(land_data_type),  intent(in) :: Land
+   type(ice_data_type),   intent(in) :: Ice
+   type(land_ice_atmos_boundary_type),intent(in) :: Atmos_boundary
+   type(atmos_land_boundary_type),    intent(inout):: Land_boundary
+   type(atmos_ice_boundary_type),     intent(inout):: Ice_boundary
+   type(time_type),       intent(in) :: Time_start,Timet
+   type(ice_ocean_boundary_type),     intent(inout):: ice_ocean_boundary
+   logical,               intent(in) :: couple_flux_calculator
 #ELSE
-     Ice_boundary)
-#ENDIF
+subroutine flux_down_from_atmos (Time, Atm, Land, Ice, &
+     Atmos_boundary, Land_boundary, Ice_boundary)
+
+  type(time_type),       intent(in) :: Time
   type(atmos_data_type), intent(inout) :: Atm
   type(land_data_type),  intent(in) :: Land
   type(ice_data_type),   intent(in) :: Ice
   type(land_ice_atmos_boundary_type),intent(in) :: Atmos_boundary
   type(atmos_land_boundary_type),    intent(inout):: Land_boundary
   type(atmos_ice_boundary_type),     intent(inout):: Ice_boundary
-#IFDEF OASIS_IOW_ESM
-  type(time_type),       intent(in) :: Time,Time_start,Timet
-  type(ice_ocean_boundary_type),     intent(inout):: ice_ocean_boundary
-  logical,               intent(in) :: couple_flux_calculator
 #ENDIF
 
   real, dimension(n_xgrid_sfc) :: ex_flux_sw, ex_flux_lwd, &

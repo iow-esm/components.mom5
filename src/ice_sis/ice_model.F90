@@ -197,7 +197,7 @@ contains
 subroutine update_ice_model_fast_new ( Atmos_boundary, Ice, type_atmos )
    type(atmos_ice_boundary_type), intent(inout) :: Atmos_boundary
    type (ice_data_type),          intent(inout) :: Ice
-   CHARACTER(*), intent(in)  :: type_atmos 
+   CHARACTER(*), OPTIONAL, INTENT(IN)  :: type_atmos 
 #ELSE
   subroutine update_ice_model_fast_new ( Atmos_boundary, Ice )
     type(atmos_ice_boundary_type), intent(inout) :: Atmos_boundary
@@ -767,7 +767,7 @@ subroutine update_ice_model_fast_new ( Atmos_boundary, Ice, type_atmos )
     real, dimension(isc:iec,jsc:jec,km), intent(in) :: flux_q           ! specific humidity flux (+up)
 #IFDEF OASIS_IOW_ESM
     real, dimension(isc:iec,jsc:jec,km), optional, intent(in) :: flux_lhc           ! latent heat flux (+up)
-    CHARACTER(len=16) :: type_atmos
+    CHARACTER(len=16), OPTIONAL, INTENT(IN) :: type_atmos
 #ENDIF
     real, dimension(isc:iec,jsc:jec,km), intent(in) :: flux_sw_nir_dir ! net near IR direct shortwave radiation (+ down)
     real, dimension(isc:iec,jsc:jec,km), intent(in) :: flux_sw_nir_dif ! net near IR diffuse shortwave radiation (+ down)
@@ -793,6 +793,15 @@ subroutine update_ice_model_fast_new ( Atmos_boundary, Ice, type_atmos )
     type (time_type)                    :: Dt_ice
     real, dimension(isc:iec,jsc:jec)    :: cosz_alb
 
+#IFDEF OASIS_IOW_ESM
+    CHARACTER (len=16) :: type_atmos_local
+    IF(present(type_atmos)) THEN 
+      type_atmos_local=type_atmos
+    ELSE
+      type_atmos_local='none'
+    ENDIF
+#ENDIF
+
     if (id_alb>0) sent = send_data(id_alb, all_avg(Ice%albedo,Ice%part_size(isc:iec,jsc:jec,:)), &
          Ice%Time, mask=Ice%mask)
     !
@@ -806,9 +815,9 @@ subroutine update_ice_model_fast_new ( Atmos_boundary, Ice, type_atmos )
              flux_t_new(i,j,k)  = flux_t(i,j,k)
              flux_q_new(i,j,k)  = flux_q(i,j,k)
 #IFDEF OASIS_IOW_ESM
-             IF (TRIM(type_atmos) == 'flux_calculator') THEN
+             IF (TRIM(type_atmos_local) == 'flux_calculator') THEN
                flux_lh_new(i,j,k) = flux_lhc(i,j,k)
-             ELSE
+             ELSEIF (TRIM(type_atmos_local) == 'none') THEN
 #ENDIF
              flux_lh_new(i,j,k) = hlv*flux_q(i,j,k)
 #IFDEF OASIS_IOW_ESM
@@ -1846,9 +1855,9 @@ subroutine atm_ice_bnd_type_chksum(id, timestep, bnd_type)
     write(outunit,100) 'atm_ice_bnd_type%t_flux          ',mpp_chksum(bnd_type%t_flux)
     write(outunit,100) 'atm_ice_bnd_type%q_flux          ',mpp_chksum(bnd_type%q_flux)
 #IFDEF OASIS_IOW_ESM
-    write(outunit,100) 'atm_ice_bnd_type%lh_flux          ',mpp_chksum(bnd_type%lh_flux)
-    write(outunit,100) 'atm_ice_bnd_type%u_wind          ',mpp_chksum(bnd_type%u_wind)
-    write(outunit,100) 'atm_ice_bnd_type%v_wind          ',mpp_chksum(bnd_type%v_wind)
+      write(outunit,100) 'atm_ice_bnd_type%lh_flux          ',mpp_chksum(bnd_type%lh_flux)
+      write(outunit,100) 'atm_ice_bnd_type%u_wind          ',mpp_chksum(bnd_type%u_wind)
+      write(outunit,100) 'atm_ice_bnd_type%v_wind          ',mpp_chksum(bnd_type%v_wind)
 #ENDIF
     write(outunit,100) 'atm_ice_bnd_type%lw_flux         ',mpp_chksum(bnd_type%lw_flux)
     write(outunit,100) 'atm_ice_bnd_type%sw_flux_vis_dir ',mpp_chksum(bnd_type%sw_flux_vis_dir)

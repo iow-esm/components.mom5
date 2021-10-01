@@ -398,7 +398,7 @@ subroutine ocean_wave_model(Time, Waves, Ice_ocean_boundary, type_atmos)
   type(ocean_time_type),          intent(in)    :: Time 
   type(ocean_wave_type),          intent(inout) :: Waves
   type(ice_ocean_boundary_type),  intent(in)    :: Ice_ocean_boundary
-  CHARACTER(*),  intent(in) :: type_atmos 
+  CHARACTER(*), OPTIONAL, INTENT(IN) :: type_atmos 
 #ELSE
 subroutine ocean_wave_model(Time, Waves, Ice_ocean_boundary)   
   type(ocean_time_type),          intent(in)    :: Time 
@@ -408,6 +408,15 @@ subroutine ocean_wave_model(Time, Waves, Ice_ocean_boundary)
   integer :: i,j
   integer :: ndtt, nww
   real    :: wmax, cspeed, dtwmax, cm
+
+#IFDEF OASIS_IOW_ESM
+  CHARACTER (len=16) :: type_atmos_local
+  IF(present(type_atmos)) THEN 
+    type_atmos_local=type_atmos
+  ELSE
+    type_atmos_local='none'
+  ENDIF
+#ENDIF
 
   if ( .not.module_is_initialized ) return  
 
@@ -427,10 +436,10 @@ subroutine ocean_wave_model(Time, Waves, Ice_ocean_boundary)
   windy = 0.0
 
 #IFDEF OASIS_IOW_ESM
-  IF (TRIM(type_atmos) == 'flux_calculator') THEN
+  IF (TRIM(type_atmos_local) == 'flux_calculator') THEN
     wrk1(isc:iec,jsc:jec)=Ice_ocean_boundary%u_wind(isc:iec,jsc:jec)
     wrk2(isc:iec,jsc:jec)=Ice_ocean_boundary%v_wind(isc:iec,jsc:jec)
-  ELSEIF (TRIM(type_atmos) == 'none') THEN
+  ELSEIF (TRIM(type_atmos_local) == 'none') THEN
 #ENDIF
   call data_override('OCN', 'u_bot', wrk1, Time%model_time )
   call data_override('OCN', 'v_bot', wrk2, Time%model_time )

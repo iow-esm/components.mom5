@@ -428,28 +428,20 @@ character(len=256), parameter   :: note_header =                                
 !#######################################################################
 
 #IFDEF OASIS_IOW_ESM
-IF (TRIM(type_atmos) == 'none') THEN
-#ENDIF
-  call mpp_init()
-#IFDEF OASIS_IOW_ESM
-ELSE
   call oas_init(mpi_comm_mom)
   call mpp_init(localcomm=mpi_comm_mom)
-ENDIF
+#ELSE
+  call mpp_init()
 #ENDIF
 
 !these clocks are on the global pelist
   initClock = mpp_clock_id( 'Initialization' )
   call mpp_clock_begin(initClock)
-
+  
 #IFDEF OASIS_IOW_ESM
-IF (TRIM(type_atmos) == 'none') THEN
-#ENDIF
-  call fms_init()
-#IFDEF OASIS_IOW_ESM
-ELSE
   call fms_init(mpi_comm_mom)
-ENDIF
+#ELSE
+  call fms_init()
 #ENDIF
 
  call coupler_init
@@ -460,10 +452,9 @@ ENDIF
  call mpp_set_current_pelist()
 
 #IFDEF OASIS_IOW_ESM
-IF (TRIM(type_atmos) /= 'none') THEN
   call oas_define(mpi_comm_mom)
-ENDIF
 #ENDIF
+
   call mpp_clock_end (initClock) !end initialization
 
 
@@ -820,17 +811,8 @@ call mpp_clock_end(newClock14)
   
 
 #IFDEF OASIS_IOW_ESM 
-  IF (TRIM(type_atmos) /= 'none') THEN
-    call oas_finalize ! needs to be called  after fms_end()
-  ENDIF
+  call oas_finalize ! needs to be called  after fms_end()
 #ENDIF 
- 
-  IF (mpp_pe().EQ.mpp_root_pe()) THEN
-     open(unit=50, file='goodfile')
-     write(50,*)'go on'
-     close(50)
-  ENDIF
-
 
 !-----------------------------------------------------------------------
 
