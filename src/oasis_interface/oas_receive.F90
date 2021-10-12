@@ -1,4 +1,4 @@
-#IFDEF COUP_OAS
+#IFDEF OASIS_IOW_ESM
 SUBROUTINE oas_recieve( kid, kstep, pdata, kinfo )
 
 !!---------------------------------------------------------------------

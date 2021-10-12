@@ -41,6 +41,10 @@ use  sat_vapor_pres_mod, only: escomp, descomp
 use       constants_mod, only: cp_air, hlv, stefan, rdgas, rvgas, grav, vonkarm
 use             mpp_mod, only: input_nml_file
 
+#IFDEF OASIS_IOW_ESM
+use oas_vardef,              only: type_atmos
+#ENDIF
+
 implicit none
 private
 
@@ -476,7 +480,8 @@ subroutine surface_flux_1d (                                           &
     call  ncar_ocean_fluxes (w_atm, th_atm, t_surf0, q_atm, q_surf0, z_atm, &
                              seawater, cd_m, cd_t, cd_q, u_star, b_star     )
   end if
-#IFDEF COUP_OAS !sandra
+#IFDEF OASIS_IOW_ESM
+  IF (TRIM(type_atmos) == 'flux_calculator') THEN
      flux_t     = 0.0
      flux_q     = 0.0
      flux_r     = 0.0
@@ -493,8 +498,8 @@ subroutine surface_flux_1d (                                           &
      q_star     = 0.0
      q_surf     = 0.0
      w_atm      = 0.0
-
-#ELSE
+  ELSEIF (TRIM(type_atmos) == 'none') THEN
+#ENDIF
   where (avail)
      ! scale momentum drag coefficient on orographic roughness
      cd_m = cd_m*(log(z_atm/rough_mom+1)/log(z_atm/rough_scale+1))**2
@@ -558,6 +563,8 @@ subroutine surface_flux_1d (                                           &
      q_surf     = 0.0
      w_atm      = 0.0
   endwhere
+#IFDEF OASIS_IOW_ESM
+  ENDIF
 #ENDIF
   ! calculate d(stress component)/d(atmos wind component)
   dtaudu_atm = 0.0

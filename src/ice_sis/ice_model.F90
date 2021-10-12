@@ -140,7 +140,7 @@ module ice_model_mod
      real, dimension(:,:,:), pointer :: data    =>NULL()
      integer                         :: xtype
      type(coupler_3d_bc_type)        :: fluxes     ! array of fluxes used for additional tracers
-#IFDEF COUP_OAS !sandra
+#IFDEF OASIS_IOW_ESM
      real, dimension(:,:,:), pointer :: lh_flux  =>NULL() ! for coupling latent heat 
      real, dimension(:,:), pointer :: u_wind  =>NULL()  ! for wave model
      real, dimension(:,:), pointer :: v_wind  =>NULL()  ! for wave model
@@ -193,14 +193,19 @@ contains
 
   end subroutine update_ice_model_slow_dn
 
+#IFDEF OASIS_IOW_ESM 
+subroutine update_ice_model_fast_new ( Atmos_boundary, Ice, type_atmos )
+   type(atmos_ice_boundary_type), intent(inout) :: Atmos_boundary
+   type (ice_data_type),          intent(inout) :: Ice
+   CHARACTER(*), OPTIONAL, INTENT(IN)  :: type_atmos 
+#ELSE
   subroutine update_ice_model_fast_new ( Atmos_boundary, Ice )
     type(atmos_ice_boundary_type), intent(inout) :: Atmos_boundary
     type (ice_data_type),          intent(inout) :: Ice
+#ENDIF
 
     call mpp_clock_begin(iceClock)
     call mpp_clock_begin(iceClock3)
-
-#IFDEF COUP_OAS !sandra
     call update_ice_model_fast_old (Ice, Atmos_boundary%fluxes,  &
                                          Atmos_boundary%u_flux,  &
                                          Atmos_boundary%v_flux,  &
@@ -212,7 +217,10 @@ contains
                                          Atmos_boundary%lw_flux, &
                                          Atmos_boundary%t_flux,  &
                                          Atmos_boundary%q_flux,  &
+#IFDEF OASIS_IOW_ESM                                         
                                          Atmos_boundary%lh_flux, &   !inserted for coupling latent heat
+                                         type_atmos, &
+#ENDIF                                         
                                          Atmos_boundary%dhdt,    &
                                          Atmos_boundary%dedt,    &
                                          Atmos_boundary%drdt,    &
@@ -220,27 +228,6 @@ contains
                                          Atmos_boundary%fprec,   &
                                          Atmos_boundary%coszen,  &
                                          Atmos_boundary%p        )
-#ELSE
-    call update_ice_model_fast_old (Ice, Atmos_boundary%fluxes,  &
-                                         Atmos_boundary%u_flux,  &
-                                         Atmos_boundary%v_flux,  &
-                                         Atmos_boundary%u_star,  &
-                                         Atmos_boundary%sw_flux_nir_dir, &
-                                         Atmos_boundary%sw_flux_nir_dif, &
-                                         Atmos_boundary%sw_flux_vis_dir, &
-                                         Atmos_boundary%sw_flux_vis_dif, &
-                                         Atmos_boundary%lw_flux, &
-                                         Atmos_boundary%t_flux,  &
-                                         Atmos_boundary%q_flux,  &
-                                         Atmos_boundary%dhdt,    &
-                                         Atmos_boundary%dedt,    &
-                                         Atmos_boundary%drdt,    &
-                                         Atmos_boundary%lprec,   &
-                                         Atmos_boundary%fprec,   &
-                                         Atmos_boundary%coszen,  &
-                                         Atmos_boundary%p        )
-#ENDIF
-
     call mpp_clock_end(iceClock3)
     call mpp_clock_end(iceClock)
 
@@ -765,8 +752,9 @@ contains
   subroutine update_ice_model_fast_old (Ice, Atmos_boundary_fluxes, flux_u,  flux_v, u_star, &
        flux_sw_nir_dir, flux_sw_nir_dif, flux_sw_vis_dir, flux_sw_vis_dif,&
        flux_lw, flux_t, flux_q, &
-#IFDEF COUP_OAS
+#IFDEF OASIS_IOW_ESM
        flux_lhc, &
+       type_atmos, &
 #ENDIF
        dhdt, dedt, drdt, lprec, fprec, coszen, p_surf )
 
@@ -777,8 +765,9 @@ contains
     real, dimension(isc:iec,jsc:jec,km), intent(in) :: flux_lw          ! net longwave radiation (+ down)
     real, dimension(isc:iec,jsc:jec,km), intent(in) :: flux_t           ! sensible heat flux (+ up)
     real, dimension(isc:iec,jsc:jec,km), intent(in) :: flux_q           ! specific humidity flux (+up)
-#IFDEF COUP_OAS !sandra wird derzeit nicht verwendet
+#IFDEF OASIS_IOW_ESM
     real, dimension(isc:iec,jsc:jec,km), optional, intent(in) :: flux_lhc           ! latent heat flux (+up)
+    CHARACTER(len=16), INTENT(IN) :: type_atmos
 #ENDIF
     real, dimension(isc:iec,jsc:jec,km), intent(in) :: flux_sw_nir_dir ! net near IR direct shortwave radiation (+ down)
     real, dimension(isc:iec,jsc:jec,km), intent(in) :: flux_sw_nir_dif ! net near IR diffuse shortwave radiation (+ down)
@@ -816,10 +805,14 @@ contains
              flux_v_new(i,j,k)  = flux_v(i,j,k)
              flux_t_new(i,j,k)  = flux_t(i,j,k)
              flux_q_new(i,j,k)  = flux_q(i,j,k)
-#IFDEF COUP_OAS !sandra
-             flux_lh_new(i,j,k) = flux_lhc(i,j,k)
-#ELSE
+#IFDEF OASIS_IOW_ESM
+             IF (TRIM(type_atmos) == 'flux_calculator') THEN
+               flux_lh_new(i,j,k) = flux_lhc(i,j,k)
+             ELSEIF (TRIM(type_atmos) == 'none') THEN
+#ENDIF
              flux_lh_new(i,j,k) = hlv*flux_q(i,j,k)
+#IFDEF OASIS_IOW_ESM
+             ENDIF
 #ENDIF
              flux_lw_new(i,j,k) = flux_lw(i,j,k)
              flux_sw_nir_dir_new(i,j,k) = flux_sw_nir_dir(i,j,k)
@@ -919,8 +912,6 @@ contains
        end do
     end do
 
-
-
     call compute_ocean_roughness (Ice%mask, u_star(:,:,1), Ice%rough_mom(:,:,1), &
                                   Ice%rough_heat(:,:,1), Ice%rough_moist(:,:,1)  )
 
@@ -959,8 +950,6 @@ contains
       flux_sw_vis_dif_new, flux_lw_new, lprec_new,   fprec_new,  flux_lh_new ) ! fluxes are stored 
 
     Ice%Time = Ice%Time + Ice%Time_step_fast ! advance time
-
-    !write(*,*)  "Ice%Time " , Ice%Time  ! sandra
 
   end subroutine update_ice_model_fast_old
 
@@ -1856,10 +1845,10 @@ subroutine atm_ice_bnd_type_chksum(id, timestep, bnd_type)
     write(outunit,100) 'atm_ice_bnd_type%u_star          ',mpp_chksum(bnd_type%u_star)
     write(outunit,100) 'atm_ice_bnd_type%t_flux          ',mpp_chksum(bnd_type%t_flux)
     write(outunit,100) 'atm_ice_bnd_type%q_flux          ',mpp_chksum(bnd_type%q_flux)
-#IFDEF COUP_OAS !sandra
-    write(outunit,100) 'atm_ice_bnd_type%lh_flux          ',mpp_chksum(bnd_type%lh_flux)
-    write(outunit,100) 'atm_ice_bnd_type%u_wind          ',mpp_chksum(bnd_type%u_wind)
-    write(outunit,100) 'atm_ice_bnd_type%v_wind          ',mpp_chksum(bnd_type%v_wind)
+#IFDEF OASIS_IOW_ESM
+      write(outunit,100) 'atm_ice_bnd_type%lh_flux          ',mpp_chksum(bnd_type%lh_flux)
+      write(outunit,100) 'atm_ice_bnd_type%u_wind          ',mpp_chksum(bnd_type%u_wind)
+      write(outunit,100) 'atm_ice_bnd_type%v_wind          ',mpp_chksum(bnd_type%v_wind)
 #ENDIF
     write(outunit,100) 'atm_ice_bnd_type%lw_flux         ',mpp_chksum(bnd_type%lw_flux)
     write(outunit,100) 'atm_ice_bnd_type%sw_flux_vis_dir ',mpp_chksum(bnd_type%sw_flux_vis_dir)
