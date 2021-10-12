@@ -767,7 +767,7 @@ subroutine update_ice_model_fast_new ( Atmos_boundary, Ice, type_atmos )
     real, dimension(isc:iec,jsc:jec,km), intent(in) :: flux_q           ! specific humidity flux (+up)
 #IFDEF OASIS_IOW_ESM
     real, dimension(isc:iec,jsc:jec,km), optional, intent(in) :: flux_lhc           ! latent heat flux (+up)
-    CHARACTER(len=16), OPTIONAL, INTENT(IN) :: type_atmos
+    CHARACTER(len=16), INTENT(IN) :: type_atmos
 #ENDIF
     real, dimension(isc:iec,jsc:jec,km), intent(in) :: flux_sw_nir_dir ! net near IR direct shortwave radiation (+ down)
     real, dimension(isc:iec,jsc:jec,km), intent(in) :: flux_sw_nir_dif ! net near IR diffuse shortwave radiation (+ down)
@@ -793,15 +793,6 @@ subroutine update_ice_model_fast_new ( Atmos_boundary, Ice, type_atmos )
     type (time_type)                    :: Dt_ice
     real, dimension(isc:iec,jsc:jec)    :: cosz_alb
 
-#IFDEF OASIS_IOW_ESM
-    CHARACTER (len=16) :: type_atmos_local
-    IF(present(type_atmos)) THEN 
-      type_atmos_local=type_atmos
-    ELSE
-      type_atmos_local='none'
-    ENDIF
-#ENDIF
-
     if (id_alb>0) sent = send_data(id_alb, all_avg(Ice%albedo,Ice%part_size(isc:iec,jsc:jec,:)), &
          Ice%Time, mask=Ice%mask)
     !
@@ -815,9 +806,9 @@ subroutine update_ice_model_fast_new ( Atmos_boundary, Ice, type_atmos )
              flux_t_new(i,j,k)  = flux_t(i,j,k)
              flux_q_new(i,j,k)  = flux_q(i,j,k)
 #IFDEF OASIS_IOW_ESM
-             IF (TRIM(type_atmos_local) == 'flux_calculator') THEN
+             IF (TRIM(type_atmos) == 'flux_calculator') THEN
                flux_lh_new(i,j,k) = flux_lhc(i,j,k)
-             ELSEIF (TRIM(type_atmos_local) == 'none') THEN
+             ELSEIF (TRIM(type_atmos) == 'none') THEN
 #ENDIF
              flux_lh_new(i,j,k) = hlv*flux_q(i,j,k)
 #IFDEF OASIS_IOW_ESM
