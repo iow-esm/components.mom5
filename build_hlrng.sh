@@ -36,15 +36,15 @@ if [ $debug == "debug" ]; then
 	# compiler flags
 	export IOW_ESM_CPPDEFS="-DOASIS_IOW_ESM -DIOW_ESM_DEBUG"
 
-	export IOW_ESM_FFLAGS="-O0 -r8 -g -traceback -check all -fp-model fast=2 -xHost -I${IOW_ESM_NETCDF_INCLUDE}/"
-	export IOW_ESM_CFLAGS="-O0 -r8 -g -traceback -fp-model fast=2 -xHost -I${IOW_ESM_NETCDF_INCLUDE}/"
+	export IOW_ESM_FFLAGS="-O0 -r8 -g -traceback -check all -fp-model precise -xHost -I${IOW_ESM_NETCDF_INCLUDE}/"
+	export IOW_ESM_CFLAGS="-O0 -g -traceback -fp-model precise -xHost -I${IOW_ESM_NETCDF_INCLUDE}/"
 	export IOW_ESM_LDFLAGS="-g -traceback -L${IOW_ESM_NETCDF_LIBRARY} -lnetcdf -lnetcdff -Wl,-rpath,${IOW_ESM_NETCDF_LIBRARY}"
 else
 	# compiler flags
 	export IOW_ESM_CPPDEFS="-DOASIS_IOW_ESM"
 	
-	export IOW_ESM_FFLAGS="-O3 -r8 -no-prec-div -fp-model fast=2 -xHost -I${IOW_ESM_NETCDF_INCLUDE}/"
-	export IOW_ESM_CFLAGS="-O3 -r8 -no-prec-div -fp-model fast=2 -xHost -I${IOW_ESM_NETCDF_INCLUDE}/"
+	export IOW_ESM_FFLAGS="-O3 -r8 -align -pad -static-intel -fp-model precise -qopt-zmm-usage=high -xCORE-AVX512 -I${IOW_ESM_NETCDF_INCLUDE}/"
+	export IOW_ESM_CFLAGS="-O3 -align -pad -static-intel -fp-model precise -qopt-zmm-usage=high -xCORE-AVX512 -I${IOW_ESM_NETCDF_INCLUDE}/"
 	export IOW_ESM_LDFLAGS="-L${IOW_ESM_NETCDF_LIBRARY} -lnetcdf -lnetcdff -Wl,-rpath,${IOW_ESM_NETCDF_LIBRARY}"
 fi
 
