@@ -196,7 +196,7 @@ INTEGER, INTENT(IN) :: dt_cpld
   jn = 31
   !IF( nrcvinfo(jn) == OASIS_Rcv ) THEN                                                               ! shortwave radiation direct 31..36
     do k = 1, size(Ice_boundary%sw_flux_vis_dir,3)
-      WHERE (maskt == 0) Ice_boundary%sw_flux_vis_dir(isc:iec,jsc:jec,k) =  -frcv(isc:iec,jsc:jec,jn)
+      WHERE (maskt == 0) Ice_boundary%sw_flux_vis_dir(isc:iec,jsc:jec,k) =  -frcv(isc:iec,jsc:jec,jn)*(1.0-Ice%albedo_vis_dir(isc:iec,jsc:jec,k))  
       jn = jn + 1
     enddo
   !ENDIF
@@ -204,7 +204,7 @@ INTEGER, INTENT(IN) :: dt_cpld
   jn = 37
   !IF( nrcvinfo(jn) == OASIS_Rcv ) THEN                                                              ! shortware radiation diffusive 37)
     do k = 1, size(Ice_boundary%sw_flux_vis_dif,3)
-      WHERE (maskt == 0) Ice_boundary%sw_flux_vis_dif(isc:iec,jsc:jec,k) =  -frcv(isc:iec,jsc:jec,jn)
+      WHERE (maskt == 0) Ice_boundary%sw_flux_vis_dif(isc:iec,jsc:jec,k) =  -frcv(isc:iec,jsc:jec,jn)*(1.0-Ice%albedo_vis_dif(isc:iec,jsc:jec,k))  
     enddo
   !ENDIF
 
