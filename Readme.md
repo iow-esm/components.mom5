@@ -24,7 +24,46 @@ Please refer to https://mom-ocean.github.io/docs/userguide/ for more information
 
 # Versions
 
-## 1.01.00 (latest release)
+## 1.01.01 (latest release)
+
+| date        | author(s)   | link      |
+|---          |---          |---        |
+| 2023-07-24  | SK          | [1.01.01](https://git.io-warnemuende.de/iow_esm/components.mom5/src/branch/1.01.01)  |  
+
+<details> 
+
+### changes
+* apply albedo for direct and diffusive radiation directly in MOM and not in the `flux_calculator`
+
+### dependencies
+* OASIS3-MCT libraries
+* see build scripts for more dependencies  
+
+### known issues
+* in coupled model this version leads to too cold winter temperatures 
+  when evaluated from 1959-201
+  * tested bias corrections can improve on that
+* model is not running on phy-2
+* Caution: this code is not compatible with current 8nm example setups!
+  * 8nm examples have to be updated according to version 1.01.00
+
+### tested with
+* intensively tested on both HLRN machines
+  * using example setups available under:
+    (coupled) /scratch/usr/mviowmod/IOW_ESM/setups/
+              MOM5_Baltic-CCLM_Eurocordex/example_3nm_0.22deg/1.00.00
+         and  https://zenodo.org/record/8167743/files/1.00.00.tar.gz (https://doi.org/10.5281/zenodo.8167743)              
+    (uncoupled) /scratch/usr/mviowmod/IOW_ESM/setups/
+                MOM5_Baltic/example_3nm/1.00.00
+   * results exhibit known issues
+  * can be built and run on Haumea but output is not intensively tested
+
+</details>
+
+<details>
+<summary><b><i>older versions</i></b></summary>
+
+## 1.01.00
 
 | date        | author(s)   | link      |
 |---          |---          |---        |
@@ -57,6 +96,7 @@ Please refer to https://mom-ocean.github.io/docs/userguide/ for more information
    * results exhibit known issues
   * can be built and run on Haumea but output is not intensively tested
 
+</details>
 
 ## 1.00.00 
 
@@ -102,3 +142,6 @@ Please refer to https://mom-ocean.github.io/docs/userguide/ for more information
                 MOM5_Batlic/example_8nm/1.00.00
    * results exhibit known issues
   * can be built and run on Haumea but output is not intensively tested
+
+</details>
+</details>
